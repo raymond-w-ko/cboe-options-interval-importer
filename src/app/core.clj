@@ -1,84 +1,84 @@
 (ns app.core
   (:import
    [java.util.zip ZipInputStream]
-   [java.io LineNumberReader InputStreamReader BufferedReader])
+   [java.io LineNumberReader InputStreamReader BufferedReader]
+   [java.sql DriverManager Statement PreparedStatement ResultSet])
   (:require
    [clojure.pprint :refer [pprint]]
    [clojure.java.io :as io :refer []]
-   [clojure.string :as str]))
+   [com.climate.claypoole :as cp]
+   [clojure.string :as str]
+   [clojure.core.cache :as c]
+   [clojure.core.cache.wrapped :as cw]
+   [clojure.core.async :refer [go go-loop >! >!! <! <!! chan put!]]
+   
+   [app.macros :refer [->hash field cond-let]]
+   [app.db :refer [create-db-connection create-insert-option-pstmt create-select-option-pstmt
+		   select-option insert-option
+		   sql-query]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (set! *warn-on-reflection* true)
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def field-names
-	["underlying_symbol"
-	 "quote_datetime"
-	 "root"
-	 "expiration"
-	 "strike"
-	 "option_type"
-	 "open"
-	 "high"
-	 "low"
-	 "close"
-	 "trade_volume"
-	 "bid_size"
-	 "bid"
-	 "ask_size"
-	 "ask"
-	 "underlying_bid"
-	 "underlying_ask"
-	 "implied_underlying_price"
-	 "active_underlying_price"
-	 "implied_volatility"
-	 "delta"
-	 "gamma"
-	 "theta"
-	 "vega"
-	 "rho"
-	 "open_interest"])
-(def field-name-indexes (into {} (map-indexed (fn [i x] [x i]) field-names)))
-
-(defmacro field [arr k]
-  (let [i (get field-name-indexes k)
-        transformer (case k
-                      "delta" `(Double/parseDouble)
-                      nil)]
-    `(-> (aget ~arr ~i)
-         ~@transformer)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (defonce *roots (atom #{}))
+(defonce options-ch (chan (* 1024 1024)))
 
-(defn process-zip [m zip-file]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn lookup-or-create-option-id*
+  [select-option-pstmt insert-option-pstmt k]
+  (cond-let
+   :let [option-id (select-option select-option-pstmt k)]
+   option-id (do (comment println "EXISTS" option-id)
+		 option-id)
+   
+   :let [option-id (insert-option insert-option-pstmt k)]
+   :return option-id))
+
+(defn get-option-id*
+  [options-cache value-fn k]
+  (cw/lookup-or-miss options-cache k value-fn))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn process-line [args *seen
+		    i ^java.lang.String line]
+  (let [arr (.split line ",")
+	underlying_symbol (field arr "underlying_symbol")
+	root (field arr "root")
+	expiration (field arr "expiration")
+	strike (field arr "strike")
+	option_type (field arr "option_type")
+	
+	k [underlying_symbol root expiration strike option_type]]
+    (go
+     (when-not (contains? @*seen k)
+       (>!! options-ch k)
+       (vswap! *seen conj k)))))
+
+(defn process-zip [args zip-file]
   (let [is (io/input-stream zip-file)
         zip-stream (ZipInputStream. is)
         ;; assume one and only one entry
         entry (.getNextEntry zip-stream)
         fname (.getName entry)
         reader (-> (InputStreamReader. zip-stream)
-                   (BufferedReader. (* 1024 1024 8)))]
-    (println fname)
-
-    ;; skip header
-    (.readLine reader)
+                   (BufferedReader. (* 1024 1024 8)))
+	
+	*seen (volatile! #{})]
+    (.readLine reader) ;; skip header
 
     (loop [i 0
            line (.readLine reader)]
-      (when-not line
-        (println i))
-      (when line
-        (let [arr (.split line ",")]
-          (swap! *roots conj (field arr "root")))
-        (when (= 0 (mod i 1000000))
-          (println i))
-        (recur (inc i) (.readLine reader))))
 
-    (update m :processed-csvs conj fname)))
+      (when line (process-line args *seen i line))
+      
+      ;; last entry reached
+      (when-not line (println fname i))
+      (when line
+        (when (= 0 (mod i 1000000))
+          (println fname i))
+        (recur (inc i) (.readLine reader))))))
 
 (def zip-dir "/mnt/f/CBOE/SPX")
 (defn get-zips []
@@ -87,9 +87,37 @@
        (filter #(str/ends-with? (str %) ".zip"))
        (sort-by str)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn create-args []
+  (let [db (create-db-connection)
+	options-cache (cw/lru-cache-factory {} :threshold (* 1024 1024))
+
+	select-option-pstmt (create-select-option-pstmt db)
+	insert-option-pstmt (create-insert-option-pstmt db)
+	
+	lookup-or-create-option-id (partial lookup-or-create-option-id*
+					    select-option-pstmt
+					    insert-option-pstmt)
+	get-option-id (fn [k]
+			(get-option-id* options-cache lookup-or-create-option-id k))]
+    (->hash db options-cache select-option-pstmt insert-option-pstmt
+	    lookup-or-create-option-id get-option-id)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn main
   [_]
-  (->> (get-zips)
-       ; (take 1)
-       (reduce process-zip {:processed-csvs []}))
-  (spit "roots.edn" (pr-str @*roots)))
+  (println "BEGIN")
+
+  (let [{:as args :keys [get-option-id]} (create-args)]
+    (->> (get-zips)
+	 ; (take 2)
+	 (cp/pmap 2 (partial process-zip args)))
+    
+    (go-loop []
+      (let [k (<!! options-ch)]
+	(get-option-id k)
+	(recur)))
+    
+    (println "END")))
