@@ -13,6 +13,7 @@
    [clojure.core.async :refer [go go-loop >! >!! <! <!! chan put!]]
    
    [app.macros :refer [->hash field cond-let]]
+   [app.config :refer [zip-dir]]
    [app.db :refer [create-db-connection create-insert-option-pstmt create-select-option-pstmt
 		   select-option insert-option
 		   sql-query]]))
@@ -80,7 +81,6 @@
           (println fname i))
         (recur (inc i) (.readLine reader))))))
 
-(def zip-dir "/mnt/f/CBOE/SPX")
 (defn get-zips []
   (->> (io/file zip-dir)
        (file-seq)
