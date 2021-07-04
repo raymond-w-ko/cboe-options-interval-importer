@@ -8,3 +8,6 @@ pom.xml.asc
 
 # private config
 /src/app/config.clj
+
+# non-public output
+/prices.edn
