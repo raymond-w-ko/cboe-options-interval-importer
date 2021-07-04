@@ -60,7 +60,6 @@
 (defmacro field [arr k]
   (let [i (get field-name-indexes k)
         transformer (case k
-                      "delta" `(Double/parseDouble)
                       `(identity))]
     `(-> (aget ~arr ~i)
          ~@transformer)))
