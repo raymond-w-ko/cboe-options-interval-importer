@@ -5,4 +5,4 @@ repl:
 run:
 	clojure $(JVM_ARGS) -M:none -m app.core
 upgrade:
-	clojure -M:outdated
+	clojure -M:outdated --upgrade
