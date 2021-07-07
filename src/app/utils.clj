@@ -8,7 +8,6 @@
     :as async
     :refer [go go-loop >! <! chan put! alts! close! timeout]]
    [clojure.string :as str]
-   [clojure.core.cache :as c]
    [clojure.core.cache.wrapped :as cw]
    [clojure.java.io :as io]
 
@@ -16,6 +15,17 @@
    
    [app.config :refer [zip-dir]]
    [app.macros :refer [cond-let]]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn ->core-filename [s]
+  (-> (re-matches #".*(\d\d\d\d-\d\d)([.]).*" s)
+      (get 1)))
+
+(comment (->core-filename "UnderlyingOptionsIntervals_60sec_calcs_oi_2006-01.zip"))
+
+(defn str->bytes [s]
+  (.getBytes s "UTF-8"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
