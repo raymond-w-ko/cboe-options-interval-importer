@@ -1,6 +1,5 @@
 (ns app.prices
   (:import
-   [java.util.zip ZipInputStream]
    [java.io LineNumberReader InputStreamReader BufferedReader]
    [java.sql DriverManager Connection Statement PreparedStatement ResultSet])
   (:require
@@ -17,19 +16,14 @@
             spy get-env]]
 
    [com.climate.claypoole :as cp]
-   [tick.alpha.api :as t]
 
    [app.macros :refer [->hash field cond-let]]
-   [app.config :refer [zip-dir]]
    [app.utils :refer [get-zips zip->buffered-reader intern-date-time take-batch]]
    [app.db :refer [create-db-connection]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def *num-option-intervals (atom 0))
-(def *done (atom false))
-
-(defn process-line! [args i line m]
+(defn process-line! [i line m]
   (let [arr (.split line ",")
 
         underlying_symbol (field arr "underlying_symbol")
@@ -46,10 +40,8 @@
         (assert false)))
     (assoc! m k v)))
 
-(defn process-zip! [args zip-file]
-  (let [{:keys [^BufferedReader reader fname]} (zip->buffered-reader zip-file)
-        f (partial process-line! args)]
-
+(defn process-zip! [zip-file]
+  (let [{:keys [^BufferedReader reader fname]} (zip->buffered-reader zip-file)]
     (loop [i 0
            line (.readLine reader)
            m (transient {})]
@@ -58,7 +50,7 @@
         (when (= 0 (mod i 1000000)) (info fname i)))
 
       (if line
-        (let [m (f i line m)]
+        (let [m (process-line! i line m)]
           (recur (inc i) (.readLine reader) m))
         (let [ret (persistent! m)]
           (info "zip prices map size" (count ret))
@@ -119,12 +111,10 @@
     (->hash db insert-prices-pstmt)))
 
 (defn run []
-  (let [args (create-args)]
-    (println "args constructed")
-
+  (let [num-threads (+ 2 (cp/ncpus))]
     (->> (get-zips)
          ; (take 2)
-         (cp/pmap 8 (partial process-zip! args))
+         (cp/pmap num-threads process-zip!)
          (reduce merge-maps {})
          (sort-series)
-         (insert-into-db args))))
+         (insert-into-db (create-args)))))
