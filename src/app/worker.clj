@@ -1,4 +1,7 @@
 (ns app.worker
+  (:import
+   [java.io InputStream OutputStream]
+   [java.util.zip GZIPOutputStream])
   (:require
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
@@ -7,20 +10,22 @@
 
    [app.macros :refer [->hash field cond-let]]
    [app.utils :refer [str->bytes ->core-filename]]
+   [app.sentinels :refer [->done-object-key]]
 
    [app.s3 :refer [zip-object-key->line-seq
                    open-object-output-stream! close-object-output-stream!
-                   put-string-object]]))
+                   zip-object-key->input-stream put-string-object]]))
 
-(defn extract-underlying-quotes [object-key]
+(set! *warn-on-reflection* true)
+
+(defn extract-underlying-quotes [op object-key]
   (let [core-filename (->core-filename object-key)
-        done-object-key (format "extract-underlying-quotes/%s.done" core-filename)
+        done-object-key (->done-object-key op core-filename)
 
         {:keys [lines]} (zip-object-key->line-seq object-key)
 
-
         ->kv
-        (fn [line]
+        (fn [^String line]
           (let [arr (.split line ",")
 
                 underlying_symbol (field arr "underlying_symbol")
@@ -40,21 +45,53 @@
               (assert false)))
           (assoc! m k v))
 
-        quotes-edn-string
+        ^bytes quotes-edn-string
         (->> (transduce xf (completing rf) (transient {}) lines)
              (persistent!)
              (pr-str)
              (str->bytes))]
 
-    (let [{:as stream :keys [output-stream]}
+    (let [{:as stream :keys [^OutputStream output-stream]}
           (open-object-output-stream! (format "quotes/%s.edn" core-filename))]
       (.write output-stream quotes-edn-string)
       (close-object-output-stream! stream))
 
     (put-string-object done-object-key "DONE!")))
 
-(defn -main [verb & args]
+(defn convert-to-gzip [op object-key]
+  (let [core-filename (->core-filename object-key)
+        done-object-key (->done-object-key op core-filename)
+
+        zip-input-stream (zip-object-key->input-stream object-key)
+        entry (.getNextEntry zip-input-stream)
+        fname (.getName entry)
+
+        {:as stream :keys [output-stream]}
+        (open-object-output-stream! (format "spx.gz/%s.csv.gz" core-filename))
+        
+        gzip-os (GZIPOutputStream. output-stream)
+        buf (byte-array (* 1024 1024 64))]
+
+    ;; drop header row
+    (loop [b (.read zip-input-stream)]
+      (println b)
+      (when-not (= 0x0a b)
+        (recur (.read zip-input-stream))))
+    (info "skipped CSV header row")
+
+    (loop [n (.read zip-input-stream buf)]
+      (when (not= -1 n)
+        (.write gzip-os buf 0 n)
+        (recur (.read zip-input-stream buf))))
+    (.finish gzip-os)
+
+    (close-object-output-stream! stream)
+
+    (put-string-object done-object-key "DONE!")))
+
+(defn -main [op & args]
   (let [[arg0] args]
-    (case verb
-      "extract-underlying-quotes" (extract-underlying-quotes arg0)
-      (println "unknown command: " verb args))))
+    (case op
+      "extract-underlying-quotes" (extract-underlying-quotes op arg0)
+      "convert-to-gzip" (convert-to-gzip op arg0)
+      (println "unknown command: " op args))))
