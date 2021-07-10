@@ -10,21 +10,25 @@
    [app.config :refer [aws-access-key-id aws-secret-access-key
                        zip-bucket zip-bucket-dir]]
    [app.utils :refer [->core-filename]]
+   [app.sentinels :refer [->done-object-key]]
    [app.s3 :refer [exists-object? get-zip-object-keys]]
    [clojure.string :as str]))
+
+(set! *warn-on-reflection* true)
 
 (defonce batch (-> (AWSBatchClientBuilder/standard)
                    (.withCredentials creds-provider)
                    (.withRegion "us-east-1")
                    (.build)))
 
-(defn submit-jobs [verb & {:keys [one]}]
-  (let [zip-keys (get-zip-object-keys)]
+(defn submit-jobs [op & {:keys [one]}]
+  (let [zip-keys (cond->> (get-zip-object-keys)
+                   one (take 1))]
     (dorun
      (for [object-key zip-keys]
        (let [core-filename (->core-filename object-key)
-             done-object-key (format "extract-underlying-quotes/%s.done" core-filename)
-             cmd ["/task/worker.sh" verb object-key]
+             done-object-key (->done-object-key op core-filename)
+             cmd ["/task/worker.sh" op object-key]
              overrides (-> (ContainerOverrides.)
                            (.withCommand (ArrayList. cmd)))
              jr (-> (SubmitJobRequest.)
