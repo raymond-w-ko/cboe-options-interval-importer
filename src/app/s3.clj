@@ -25,10 +25,7 @@
                 (.build)))
 
 (defn get-object [object-key]
-  (try
-   (.getObject s3 bucket object-key)
-   (catch AmazonS3Exception e
-     nil)))
+  (.getObject s3 bucket object-key))
 
 (defn exists-object? [object-key]
   (if-let [ret (try (.getObjectMetadata s3 bucket object-key)
@@ -46,10 +43,13 @@
   (->> (get-zip-objects)
        (mapv #(.getKey %))))
 
+(defn ^ZipInputStream zip-object-key->input-stream [zip-object-key]
+  (-> (get-object zip-object-key)
+      (.getObjectContent)
+      (ZipInputStream.)))
+
 (defn zip-object-key->line-seq [zip-object-key]
-  (let [zip-stream (-> (get-object zip-object-key)
-                       (.getObjectContent)
-                       (ZipInputStream.))
+  (let [zip-stream (zip-object-key->input-stream zip-object-key)
         entry (.getNextEntry zip-stream)
         fname (.getName entry)
         lines (-> (InputStreamReader. zip-stream)
