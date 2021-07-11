@@ -36,13 +36,14 @@
                 k [underlying_symbol quote_datetime]
                 v [bid ask active_price]]
             [k v]))
-        xf (comp (map ->kv))
+        xf (comp (drop 1)
+                 (map ->kv))
         rf
         (fn [m [k v]]
-          (if (contains? m k)
-            (when (not= v (get m k))
-              (error "mismatch bid/ask/active_price" k v (get m k))
-              (assert false)))
+          ; (if (contains? m k)
+          ;   (when (not= v (get m k))
+          ;     (error "mismatch bid/ask/active_price" k v (get m k))
+          ;     (assert false)))
           (assoc! m k v))
 
         ^bytes quotes-edn-string
@@ -89,9 +90,43 @@
 
     (put-string-object done-object-key "DONE!")))
 
+(defn extract-options [op object-key]
+  (let [core-filename (->core-filename object-key)
+        done-object-key (->done-object-key op core-filename)
+
+        {:keys [lines]} (zip-object-key->line-seq object-key)
+
+        ->k
+        (fn [^String line]
+          (let [arr (.split line ",")
+                underlying_symbol (field arr "underlying_symbol")
+                root (field arr "root")
+                expiration (field arr "expiration")
+                strike (field arr "strike")
+                option_type (field arr "option_type")]
+            [underlying_symbol root expiration strike option_type]))
+        xf (comp (drop 1)
+                 (map ->k))
+        rf
+        (fn [se k]
+          (conj! se k))
+        ^bytes options-edn-string
+        (->> (transduce xf (completing rf) (transient #{}) lines)
+             (persistent!)
+             (pr-str)
+             (str->bytes))]
+
+    (let [{:as stream :keys [^OutputStream output-stream]}
+          (open-object-output-stream! (format "options/%s.edn" core-filename))]
+      (.write output-stream options-edn-string)
+      (close-object-output-stream! stream))
+
+    (put-string-object done-object-key "DONE!")))
+
 (defn -main [op & args]
   (let [[arg0] args]
     (case op
       "extract-underlying-quotes" (extract-underlying-quotes op arg0)
       "convert-to-gzip" (convert-to-gzip op arg0)
+      "extract-options" (extract-options op arg0)
       (println "unknown command: " op args))))
