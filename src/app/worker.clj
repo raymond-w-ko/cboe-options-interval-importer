@@ -8,7 +8,7 @@
             logf tracef debugf infof warnf errorf fatalf reportf
             spy get-env]]
 
-   [app.macros :refer [->hash field cond-let]]
+   [app.macros :as mac :refer [->hash field cond-let]]
    [app.utils :refer [str->bytes ->core-filename]]
    [app.sentinels :refer [->done-object-key]]
 
