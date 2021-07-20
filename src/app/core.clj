@@ -22,9 +22,9 @@
 
 (defn -main []
   (println (/ (-> (Runtime/getRuntime) .maxMemory) 1024 1024) "G")
-  (println "BEGIN")
   (internal-consistency-check!)
 
-  (prices/run)
-
+  (println "BEGIN")
+  (option-intervals/run)
+  ; (prices/run)
   (println "END"))
