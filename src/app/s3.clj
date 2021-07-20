@@ -18,6 +18,8 @@
    [clojure.string :as str]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; (set! *warn-on-reflection* true)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defonce s3 (-> (AmazonS3ClientBuilder/standard)
                 (.withCredentials creds-provider)
@@ -33,6 +35,16 @@
                       false))]
     ret
     false))
+
+(defn get-objects [prefix]
+  (let [objs (S3Objects/withPrefix s3 bucket prefix)]
+    (for [obj (-> objs .iterator iterator-seq)]
+      obj)))
+
+(defn get-object-keys [prefix]
+  (let [objs (S3Objects/withPrefix s3 bucket prefix)]
+    (for [obj (-> objs .iterator iterator-seq)]
+      (.getKey obj))))
 
 (defn get-zip-objects []
   (let [objs (S3Objects/withPrefix s3 bucket zip-bucket-dir)]
