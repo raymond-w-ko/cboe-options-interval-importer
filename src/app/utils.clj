@@ -18,6 +18,18 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn array-type
+  "Return a string representing the type of an array with dims
+  dimentions and an element of type klass.
+  For primitives, use a klass like Integer/TYPE
+  Useful for type hints of the form: ^#=(array-type String) my-str-array"
+  ([klass] (array-type klass 1))
+  ([klass dims]
+   (.getName (class
+	      (apply make-array
+		     (if (symbol? klass) (eval klass) klass)
+		     (repeat dims 0))))))
+
 (defn ->core-filename [s]
   (-> (re-matches #".*(\d\d\d\d-\d\d)([.]).*" s)
       (get 1)))
