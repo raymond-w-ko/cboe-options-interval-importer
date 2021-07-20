@@ -1,7 +1,10 @@
 (ns app.option-intervals
   (:import
+   [java.lang String]
+   [java.util UUID]
    [java.util.zip ZipInputStream]
-   [java.io LineNumberReader InputStreamReader BufferedReader]
+   [java.nio.charset Charset]
+   [java.io LineNumberReader InputStreamReader BufferedReader FileWriter]
    [java.sql DriverManager Connection Statement PreparedStatement ResultSet])
   (:require
    [clojure.pprint :refer [pprint]]
@@ -9,8 +12,11 @@
    [clojure.string :as str]
    [clojure.core.cache :as c]
    [clojure.core.cache.wrapped :as cw]
-   [clojure.core.async :refer [go go-loop >! >!! <! <!! chan put! thread timeout]]
-   [clojure.core.async.impl.protocols :refer [WritePort]]
+
+   [clojure.core.async
+    :as async
+    :refer [go go-loop >! >!! <! <!! chan put! thread timeout close! to-chan
+            pipeline pipeline-blocking]]
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
             logf tracef debugf infof warnf errorf fatalf reportf
@@ -19,61 +25,63 @@
    [com.climate.claypoole :as cp]
    [tick.alpha.api :as t]
 
-   [app.macros :refer [->hash field cond-let]]
-   [app.utils :refer [get-zips zip->buffered-reader intern-date take-batch]]
+   [app.macros :as mac :refer [->hash field cond-let]]
+   [app.utils :refer [get-zips zip->buffered-reader intern-date take-batch
+                      array-type]]
    [app.db :refer [create-db-connection create-insert-option-pstmt
                    create-select-option-pstmt select-option insert-option
-                   create-insert-option-interval-pstmt
-                   insert-option-interval-batch
-                   sql-query
-                   start-bulk-loading! stop-bulk-loading!]]))
+                   create-insert-option-interval-pstmt insert-option-interval-batch
+                   create-load-option-intervals-data-pstmt load-option-intervals-file
+                   start-bulk-loading! stop-bulk-loading!]]
+   [app.s3 :refer [get-object-keys
+                   zip-object-key->line-seq]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defonce *start-instant (atom nil))
-(defonce *num-processed-items (atom 0))
-(defonce option-intervals-ch (chan 200000))
-
+(set! *warn-on-reflection* true)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def select-options-sql
-  (str "select option_id, underlying_symbol, root, expiration, option_type, strike "
+  (str "select option_id, underlying_symbol, root, expiration, strike, option_type "
        "from `options`"))
 
 (defn create-option-id-map [{:keys [^Connection conn]}]
   (let [^Statement stmt (.createStatement conn)
         _ (.setFetchSize stmt 10000)
         rs (.executeQuery stmt select-options-sql)]
-    (loop [i 0
-           coll (transient {})]
+    (loop [coll (transient {})]
       (if (.next rs)
-        (let [option_id (.getString rs 1)
+        (let [option_id (.getInt rs 1)
               underlying_symbol (.getString rs 2)
               root (.getString rs 3)
               expiration (.getString rs 4)
-              option_type (.getString rs 5)
-              strike (.getFloat rs 6)
+              strike (.getFloat rs 5)
+              option_type (.getString rs 6)
 
-              k [underlying_symbol root expiration option_type strike]
+              k [underlying_symbol root expiration strike option_type]
               v option_id]
-          ; (assert (not (contains? coll k)) (pr-str k))
-          (recur (inc i) (assoc! coll k v)))
-        (do (println "options row count" i)
-            (persistent! coll))))))
+          ; (when (contains? coll k)
+          ;   (error (pr-str k))
+          ;   (assert false "key already exists"))
+          (recur (assoc! coll k v)))
+        (persistent! coll)))))
 
-(defn create-import-option-intervals-args []
-  (let [db (create-db-connection)
+(defn create-args []
+  (let [*num-items (atom 0)
+        db (create-db-connection)
+        _ (start-bulk-loading! db)
         ->option-id (create-option-id-map db)
-        insert-option-interval-pstmt (create-insert-option-interval-pstmt db)]
-    (println "->option-id count" (count ->option-id))
-    (->hash db insert-option-interval-pstmt ->option-id)))
+        insert-option-interval-pstmt (create-insert-option-interval-pstmt db)
+        load-option-intervals-data-pstmt (create-load-option-intervals-data-pstmt db)]
+    (debug "->option-id count" (count ->option-id))
+    (->hash db *num-items ->option-id
+            insert-option-interval-pstmt load-option-intervals-data-pstmt)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def *num-option-intervals (atom 0))
 
-(defn process-line-for-import-option-intervals
-  [{:keys [->option-id]} i ^java.lang.String line]
+(defn process-line
+  [{:keys [->option-id]} ^java.lang.String line]
   (let [arr (.split line ",")
 
         underlying_symbol (field arr "underlying_symbol")
@@ -83,99 +91,128 @@
         option_type (field arr "option_type")
         strike (field arr "strike")
 
-        k [underlying_symbol root expiration option_type strike]
+        k [underlying_symbol root expiration strike option_type]
         option-id (get ->option-id k)
 
-        quote_datetime (field arr "quote_datetime")
-        open (field arr "open")
-        high (field arr "high")
-        low (field arr "low")
-        close (field arr "close")
-        trade_volume (field arr "trade_volume")
-        bid_size (field arr "bid_size")
-        bid (field arr "bid")
-        ask_size (field arr "ask_size")
-        ask (field arr "ask")
+        ; quote_datetime (field arr "quote_datetime")
+        ; open (field arr "open")
+        ; high (field arr "high")
+        ; low (field arr "low")
+        ; close (field arr "close")
+        ; trade_volume (field arr "trade_volume")
+        ; bid_size (field arr "bid_size")
+        ; bid (field arr "bid")
+        ; ask_size (field arr "ask_size")
+        ; ask (field arr "ask")
 
-        underlying_bid (field arr "underlying_bid")
-        underlying_ask (field arr "underlying_ask")
-        active_underlying_price (field arr "active_underlying_price")
+        ; underlying_bid (field arr "underlying_bid")
+        ; underlying_ask (field arr "underlying_ask")
+        ; active_underlying_price (field arr "active_underlying_price")
 
-        implied_underlying_price (field arr "implied_underlying_price")
-        implied_volatility (field arr "implied_volatility")
-        delta (field arr "delta")
-        theta (field arr "theta")
-        vega (field arr "vega")
-        rho (field arr "rho")
+        ; implied_underlying_price (field arr "implied_underlying_price")
+        ; implied_volatility (field arr "implied_volatility")
+        ; delta (field arr "delta")
+        ; theta (field arr "theta")
+        ; vega (field arr "vega")
+        ; rho (field arr "rho")
         
-        open_interest (field arr "open_interest")]
+        ; open_interest (field arr "open_interest")
+        ]
     (when-not option-id
-      (error "no option_id for" k)
+      (error "no option_id for" (pr-str k))
       (assert false))
-    ; (>!! option-intervals-ch arr)
-    arr))
+    [option-id arr]))
 
-(defn process-zip-for-import-option-intervals [args zip-file]
-  (let [{:keys [^BufferedReader reader fname]} (zip->buffered-reader zip-file)
-        f (partial process-line-for-import-option-intervals args)]
+(defn process-zip
+  "Assumes that this runs in separate thread."
+  [{:as args :keys [interval-bundle-ch]} zip-object-key]
+  (info "processing zip-object-key" zip-object-key)
+  (let [{:keys [lines ^ZipInputStream zip-stream]}
+        (zip-object-key->line-seq zip-object-key)
 
-    (loop [i 0
-           line (.readLine reader)]
+        items (->> lines
+                   (drop 1)
+                   (map (partial process-line args))
+                   (partition-all 1000000))]
+    (loop [x (first items)
+           items (rest items)]
+      (when x
+        (>!! interval-bundle-ch x)
+        (recur (first items) (rest items))))
+    (.close zip-stream)))
 
-      (when line (f i line))
+(defmacro write-column [field-name]
+  `(do (let [~'x (field ~'arr ~field-name)]
+         (.write ~'o (str ~'x)))
+       (.write ~'o "\t")))
 
-      ; (if-not line
-      ;   (info fname i)
-      ;   (when (= 0 (mod i 1000000)) (info fname i)))
+(defn load-interval-data [{:as args :keys []} intervals]
+  (let [uuid (str (UUID/randomUUID))
+        path (str "/tmp/" uuid ".tsv")]
+    (with-open [o (FileWriter. path (Charset/forName "ISO-8859-1") false)]
+      (->> intervals
+           (map (fn [[option-id #^"[Ljava.lang.String;" arr]]
+                  (.write o (String/valueOf option-id))
+                  (.write o "\t")
+                  (write-column "quote_datetime")
 
-      (if line
-        (recur (inc i) (.readLine reader))
-        (swap! *num-option-intervals + i)))
+                  (write-column "open")
+                  (write-column "high")
+                  (write-column "low")
+                  (write-column "close")
 
-    (.close reader)
-    :done))
+                  (write-column "trade_volume")
+                  (write-column "bid_size")
+                  (write-column "bid")
+                  (write-column "ask_size")
+                  (write-column "ask")
 
-(def *done-import-option-intervals (atom false))
+                  (write-column "implied_underlying_price")
+                  (write-column "implied_volatility")
 
-(defn import-option-intervals []
-  (let [args (create-import-option-intervals-args)]
-    (println "args constructed")
+                  (write-column "delta")
+                  (write-column "gamma")
+                  (write-column "theta")
+                  (write-column "vega")
+                  (write-column "rho")
 
+                  (write-column "open_interest")
+
+                  (.write o "\n")))
+           (dorun)))
+    (load-option-intervals-file args path)
+    (io/delete-file path)))
+
+(defn import-option-intervals [{:as args :keys [*num-items]}]
+  (let [object-keys (->> (get-object-keys "spx/")
+                         (take 1))
+        interval-bundle-ch (chan 8)
+        args (mac/args interval-bundle-ch)]
     (thread
-     (->> (get-zips)
-          (take 1)
-          (cp/pmap 8 (partial process-zip-for-import-option-intervals args))
-          (doall))
+     (dorun
+      (cp/pmap 4 (partial process-zip args) object-keys))
+     (close! interval-bundle-ch))
 
-     (reset! *done-import-option-intervals true)
+    (loop [intervals (<!! interval-bundle-ch)]
+      (when intervals
+        (load-interval-data args intervals)
+        (swap! *num-items + (count intervals))
+        (recur (<!! interval-bundle-ch))))))
 
-     :done-input)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-    (start-bulk-loading!)
-
-    (loop []
-      (let [batch (<!! (take-batch 100000 2000 option-intervals-ch))]
-        (cond-let
-         (nil? batch) (if-not @*done-import-option-intervals
-                        (recur)
-                        :done)
-         :else (do (when (< 0 (count batch))
-                     (insert-option-interval-batch args batch))
-                   (recur)))))
-    ))
-
-(defn start-measurement-loop []
-  (go-loop []
-    (let [ms (- (System/currentTimeMillis) @*start-instant)
-          sec (/ ms 1000.0)
-          rate (/ @*num-processed-items sec)]
-      (debug "processing rate" rate "items/sec"))
-    (<! (timeout (* 5 1000)))
-    (recur)))
+(defn start-measurement-loop [{:keys [*num-items]}]
+  (let [start-instant (System/currentTimeMillis)]
+    (go-loop []
+      (let [ms (- (System/currentTimeMillis) start-instant)
+            sec (/ ms 1000.0)
+            rate (/ @*num-items sec)]
+        (debug "processing rate" (int rate) "items/sec"))
+      (<! (timeout (* 10 1000)))
+      (recur))))
 
 (defn run []
-  (reset! *start-instant (System/currentTimeMillis))
-  (start-measurement-loop)
-  (<!! (import-option-intervals))
-
-  (debug "num option-intervals" @*num-option-intervals))
+  (let [args (create-args)]
+    (start-measurement-loop args)
+    (import-option-intervals args)
+    :done))
