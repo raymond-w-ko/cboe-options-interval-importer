@@ -7,6 +7,13 @@
     (mapv keyword vars)
     (vec vars)))
 
+(defmacro args
+  "Converts (args a b c) -> (assoc args :a a :b b :c c)"
+  [& vars]
+  (let [xs (interleave (mapv keyword vars)
+                       (vec vars))]
+    `(assoc ~'args ~@xs)))
+
 (defmacro cond-let
   "An alternative to `clojure.core/cond` where instead of a test/expression pair, it is possible
   to have a :let/binding vector pair."
