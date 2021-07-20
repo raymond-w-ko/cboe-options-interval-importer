@@ -4,7 +4,7 @@ JVM_ARGS := -J-Dclojure.core.async.go-checking=true
 repl:
 	clojure $(JVM_ARGS) -M:repl
 run:
-	clojure -J-Xmx24G -M:none -m app.core
+	clojure -J-Xmx16G -M:none -m app.core
 upgrade:
 	clojure -M:outdated --upgrade
 
@@ -18,3 +18,6 @@ push-worker-image: build-worker-image
 
 submit-jobs:
 	clojure -M:none -m app.batch
+
+reduce:
+	clojure -M:none -m app.reduce
