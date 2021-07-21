@@ -186,7 +186,7 @@
 (defn import-option-intervals [{:as args :keys [*num-items]}]
   (let [object-keys (->> (get-object-keys "spx/")
                          (take 1))
-        interval-bundle-ch (chan 8)
+        interval-bundle-ch (chan 4)
         args (mac/args interval-bundle-ch)]
     (thread
      (dorun
