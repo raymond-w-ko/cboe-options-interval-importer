@@ -115,7 +115,7 @@
         ; theta (field arr "theta")
         ; vega (field arr "vega")
         ; rho (field arr "rho")
-        
+
         ; open_interest (field arr "open_interest")
         ]
     (when-not option-id
@@ -185,12 +185,13 @@
 
 (defn import-option-intervals [{:as args :keys [*num-items]}]
   (let [object-keys (->> (get-object-keys "spx/")
-                         (take 1))
-        interval-bundle-ch (chan 4)
+                         (sort))
+        interval-bundle-ch (chan 2)
         args (mac/args interval-bundle-ch)]
     (thread
-     (dorun
-      (cp/pmap 4 (partial process-zip args) object-keys))
+     (->> object-keys
+          (map (partial process-zip args))
+          (dorun))
      (close! interval-bundle-ch))
 
     (loop [intervals (<!! interval-bundle-ch)]
