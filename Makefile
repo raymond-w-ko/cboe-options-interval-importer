@@ -5,7 +5,7 @@ repl:
 	clojure $(JVM_ARGS) -M:repl
 run:
 	clojure -J-Xmx16G -M:none -m app.core
-upgrade:
+upgrade-deps:
 	clojure -M:outdated --upgrade
 
 
