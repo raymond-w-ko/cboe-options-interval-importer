@@ -7,6 +7,8 @@ run:
 	clojure -J-Xmx16G -M:none -m app.core
 upgrade-deps:
 	clojure -M:outdated --upgrade
+javac:
+	clj -M:javac
 
 
 build-worker-image:
