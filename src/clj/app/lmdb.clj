@@ -1,12 +1,16 @@
 (ns app.lmdb
   (:import
+   [java.time Instant]
    [java.util.concurrent TimeUnit]
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
    [org.lmdbjava Env DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp DbiFlags PutFlags]
    [org.agrona MutableDirectBuffer]
-   [org.agrona.concurrent UnsafeBuffer])
+   [org.agrona.concurrent UnsafeBuffer]
+   
+   app.DbKey
+   app.DbValue)
   (:require
    [app.macros :refer [cond-xlet]]
    [clojure.java.io :as io]
@@ -78,59 +82,63 @@
     
     (print-stats)))
 
-(defn ^Integer date-string->int
-  [^String s]
-  (let [year (-> (.substring s 0 4) Integer/parseInt)
-        month (-> (.substring s 5 7) Integer/parseInt)
-        day (-> (.substring s 8 10) Integer/parseInt)]
-    (-> (unchecked-multiply 10000 year)
-        (unchecked-add (unchecked-multiply 100 month))
-        (unchecked-add day))))
+(defn spit-buffer [fname ^UnsafeBuffer buf]
+  (with-open [f (io/output-stream fname)]
+    (let [ch (Channels/newChannel f)]
+      (.write ch (.byteBuffer buf)))))
 
-(comment (date-string->int "2020-01-02"))
-
-(defn ^UnsafeBuffer option->buf
-  "key size should be sum of:
-  5 root (SPX has a lot of different and exotic types)
-  1 option type ('P' or 'C')
-  4 expiration date (remove hyphens, treat as int)
-  4 option strike price (no decimals)
-  8 quote timestamp (int64 to prepare for year 2038 problem )
-  ---------------------
-  22 bytes
-
-  Returns a org.agrona.concurrent.UnsafeBuffer"
-  [^String root ^Character option-type ^Integer expiration-date ^Integer strike
-   ^Long quote-timestamp]
-  (let [bb (ByteBuffer/allocateDirect (+ 5 1 4 4 8))
-        buf (new UnsafeBuffer bb)]
-    (cond-xlet
-     :let [idx 0]
-
-     :do (.putStringWithoutLengthUtf8 buf idx root)
-     :let [idx (+ idx 5)]
-
-     :do (.putChar buf idx option-type)
-     :let [idx (+ idx 1)]
-
-     :do (.putInt buf idx (date-string->int expiration-date) ByteOrder/BIG_ENDIAN)
-     :let [idx (+ idx 4)]
-
-     :do (.putInt buf idx strike ByteOrder/BIG_ENDIAN)
-     :let [idx (+ idx 4)]
-
-     :do (.putLong buf idx quote-timestamp ByteOrder/BIG_ENDIAN)
-     :let [idx (+ idx 8)]
-
-     :return buf)))
+(defn path->bytes 
+  (^bytes
+   [path]
+   (with-open [in (io/input-stream path)
+               out (java.io.ByteArrayOutputStream.)]
+     (io/copy in out)
+     (.toByteArray out)))
+  )
 
 (defn --repl []
   (verify)
   (test-rw)
   (print-stats)
-  (with-open [f (io/output-stream "key.hex")]
-    (let [ch (Channels/newChannel f)
-          k (option->buf "SPXPM" \P "2020-12-31" 5000 0)]
-      (.write ch (.byteBuffer k))))
+  
+  (DbValue/priceStringToInt "100.251")
+  (DbValue/priceStringToInt "100.25")
+  (DbValue/priceStringToInt "-100.25")
+  
+  (let [t (-> (Instant/now) .getEpochSecond)
+        db-key (new DbKey t "SPXPM" \P "2020-12-31" "5000")]
+    (spit-buffer "key.hex" (.toBuffer db-key)))
+  
+  (let [x (into-array
+           ["" "" "" "" "" ""
+            ;; open, high, low, close
+            "1.23" "2.34" "3.45" "4.56"
+            ;; vol, BS, bid, AS, ask
+            "42" "1" "0.99" "2" "1.01"
+            ;; ubid, uask
+            "99.99" "100.01"
+            
+            ;; iuprice, uprice
+            "101.02" "100.00"
+            
+            ;; iv, greeks
+            "0.16" "0.50" "0.03" "0.01" "0.02" "0.03"
+            
+            "69"])
+        db-v (DbValue/fromCsvLine x)]
+    (spit-buffer "value.hex" (.toBuffer db-v)))
+  
+  (let [barr (path->bytes "value.hex")
+        buf (new UnsafeBuffer barr)
+        db-v (DbValue/fromBuffer buf)]
+    (debug (.-open db-v) (.-high db-v) (.-low db-v) (.-close db-v))
+    (debug (.-trade_volume db-v) (.-bid_size db-v) (.-bid db-v) (.-ask_size db-v) (.-ask db-v))
+    (debug (.-underlying_bid db-v) (.-underlying_ask db-v))
+    (debug (.-implied_underlying_price db-v) (.-active_underlying_price db-v))
+    (debug (.-implied_volatility db-v)
+           (.-delta db-v) (.-gamma db-v) (.-theta db-v) (.-vega db-v) (.-rho db-v))
+    (debug (.-open_interest db-v))
+    nil)
+  
   nil)
 (comment (--repl))
