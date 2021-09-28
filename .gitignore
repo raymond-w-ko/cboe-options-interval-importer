@@ -12,3 +12,7 @@ pom.xml.asc
 # non-public output
 /prices.edn
 /all-options.edn
+
+# lmdb
+/lmdb*
+/*.hex
