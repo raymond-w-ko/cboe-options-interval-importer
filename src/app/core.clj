@@ -6,9 +6,12 @@
             spy get-env]]
    [tick.alpha.api :as t]
 
-   [app.options :as options]
-   [app.option-intervals :as option-intervals]
-   [app.prices :as prices]))
+   ; [app.options :as options]
+   ; [app.option-intervals :as option-intervals]
+   ; [app.prices :as prices]
+   
+   [app.lmdb]
+   ))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -25,6 +28,6 @@
   (internal-consistency-check!)
 
   (println "BEGIN")
-  (option-intervals/run)
+  ; (option-intervals/run)
   ; (prices/run)
   (println "END"))
