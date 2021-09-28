@@ -1,8 +1,8 @@
 IMAGE := 237991343424.dkr.ecr.us-east-1.amazonaws.com/cboe:latest
-JVM_ARGS := -J-Dclojure.core.async.go-checking=true
+CLJ_EXTRA_SAFETY_ARGS := -J-Dclojure.core.async.go-checking=true
 
 repl:
-	clojure $(JVM_ARGS) -M:repl
+	clojure $(CLJ_EXTRA_SAFETY_ARGS) -M:repl
 run:
 	clojure -J-Xmx16G -M:none -m app.core
 upgrade-deps:
