@@ -7,7 +7,7 @@ pom.xml.asc
 /.cpcache
 
 # private config
-/src/app/config.clj
+config.clj
 
 # non-public output
 /prices.edn
