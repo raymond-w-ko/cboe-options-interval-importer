@@ -10,8 +10,7 @@
    ; [app.option-intervals :as option-intervals]
    ; [app.prices :as prices]
    
-   [app.lmdb]
-   ))
+   [app.lmdb]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
