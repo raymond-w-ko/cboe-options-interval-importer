@@ -11,19 +11,27 @@
 
   com.taoensso/timbre {:mvn/version "5.1.2"}
   org.slf4j/slf4j-simple {:mvn/version "1.7.32"}
-  org.mariadb.jdbc/mariadb-java-client {:mvn/version "2.7.4"}
   tick/tick {:mvn/version "0.4.32"}
   
+  org.lmdbjava/lmdbjava  {:mvn/version "0.8.2"}
+  org.agrona/agrona {:mvn/version "1.12.0"}
+  
+  org.mariadb.jdbc/mariadb-java-client {:mvn/version "2.7.4"}
+  
+  ; software.amazon.awssdk/s3 {:mvn/version "2.17.46"}
   com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.74"}
   com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.74"}
+  ;; this requires AWS SDK v1
   com.github.alexmojaki/s3-stream-upload {:mvn/version "2.2.2"}
 
   javax.xml.bind/jaxb-api {:mvn/version "2.4.0-b180830.0359"}
   org.glassfish.jaxb/jaxb-runtime {:mvn/version "3.0.2"}
   org.glassfish.jaxb/jaxb-core {:mvn/version "3.0.2"}
   
+  com.clojure-goes-fast/clj-java-decompiler {:mvn/version "0.3.0"} 
   fipp/fipp {:mvn/version "0.6.24"}
   cljfmt/cljfmt {:mvn/version "0.8.0"}}
+ 
 
  :aliases
  {:none
