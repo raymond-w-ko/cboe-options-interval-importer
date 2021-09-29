@@ -8,7 +8,7 @@
     SeekOp DbiFlags PutFlags]
    [org.agrona MutableDirectBuffer]
    [org.agrona.concurrent UnsafeBuffer]
-   
+
    app.DbKey
    app.DbValue)
   (:require
@@ -64,7 +64,7 @@
         val-bb (ByteBuffer/allocateDirect 1024)
         ^MutableDirectBuffer k (new UnsafeBuffer key-bb)
         ^MutableDirectBuffer v (new UnsafeBuffer val-bb)
-        
+
         put-flags (into-array PutFlags [])]
     (with-open [txn (.txnWrite env)]
       (with-open [c (.openCursor db txn)]
@@ -72,14 +72,14 @@
         (.putStringWithoutLengthUtf8 v 0 "bar")
         (.put c k v put-flags))
       (.commit txn))
-    
+
     (print-stats)
-    
+
     (with-open [txn (.txnWrite env)]
       (with-open [c (.openCursor db txn)]
         (.delete db txn k))
       (.commit txn))
-    
+
     (print-stats)))
 
 (defn spit-buffer [fname ^UnsafeBuffer buf]
@@ -87,28 +87,27 @@
     (let [ch (Channels/newChannel f)]
       (.write ch (.byteBuffer buf)))))
 
-(defn path->bytes 
+(defn path->bytes
   (^bytes
    [path]
    (with-open [in (io/input-stream path)
                out (java.io.ByteArrayOutputStream.)]
      (io/copy in out)
-     (.toByteArray out)))
-  )
+     (.toByteArray out))))
 
 (defn --repl []
   (verify)
   (test-rw)
   (print-stats)
-  
+
   (DbValue/priceStringToInt "100.251")
   (DbValue/priceStringToInt "100.25")
   (DbValue/priceStringToInt "-100.25")
-  
+
   (let [t (-> (Instant/now) .getEpochSecond)
         db-key (new DbKey t "SPXPM" \P "2020-12-31" "5000")]
     (spit-buffer "key.hex" (.toBuffer db-key)))
-  
+
   (let [x (into-array
            ["" "" "" "" "" ""
             ;; open, high, low, close
@@ -117,17 +116,17 @@
             "42" "1" "0.99" "2" "1.01"
             ;; ubid, uask
             "99.99" "100.01"
-            
+
             ;; iuprice, uprice
             "101.02" "100.00"
-            
+
             ;; iv, greeks
             "0.16" "0.50" "0.03" "0.01" "0.02" "0.03"
-            
+
             "69"])
-        db-v (DbValue/fromCsvLine x)]
+        db-v (DbValue/fromCsvLineTokens x)]
     (spit-buffer "value.hex" (.toBuffer db-v)))
-  
+
   (let [barr (path->bytes "value.hex")
         buf (new UnsafeBuffer barr)
         db-v (DbValue/fromBuffer buf)]
@@ -139,6 +138,6 @@
            (.-delta db-v) (.-gamma db-v) (.-theta db-v) (.-vega db-v) (.-rho db-v))
     (debug (.-open_interest db-v))
     nil)
-  
+
   nil)
 (comment (--repl))
