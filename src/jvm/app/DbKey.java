@@ -1,31 +1,16 @@
 package app;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-import static java.util.concurrent.Executors.newCachedThreadPool;
-import static java.util.concurrent.TimeUnit.SECONDS;
-// import static org.hamcrest.CoreMatchers.is;
-// import static org.hamcrest.CoreMatchers.notNullValue;
-// import static org.hamcrest.CoreMatchers.startsWith;
-// import static org.hamcrest.MatcherAssert.assertThat;
-// import static org.junit.Assert.assertNotNull;
-// import static org.junit.Assert.assertNull;
-import static org.lmdbjava.ByteBufferProxy.PROXY_OPTIMAL;
-import static org.lmdbjava.DbiFlags.MDB_CREATE;
-import static org.lmdbjava.DbiFlags.MDB_DUPSORT;
-import static org.lmdbjava.DirectBufferProxy.PROXY_DB;
-import static org.lmdbjava.Env.create;
-import static org.lmdbjava.GetOp.MDB_SET;
-import static org.lmdbjava.SeekOp.MDB_FIRST;
-import static org.lmdbjava.SeekOp.MDB_LAST;
-import static org.lmdbjava.SeekOp.MDB_PREV;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.joda.time.Instant;
+import org.apache.commons.collections4.map.LRUMap;
 
 public final class DbKey {
+  private static LRUMap<String, Long> timestampMsLookupMap = new LRUMap<String, Long>(1024 * 1024);
+    
   /// unix timestamp, in seconds
   public long quoteTimestamp;
   /// must be a string of a length of 5
@@ -52,6 +37,46 @@ public final class DbKey {
     this.optionType = optionType;
     this.expirationDate = expirationDate;
     this.strike = Integer.parseInt(strikeString);
+  }
+  
+  static long toTimestampMs(String s) {
+    if (timestampMsLookupMap.containsKey(s)) {
+      return timestampMsLookupMap.get(s);
+    }
+
+    final long t = Instant.parse(s).getMillis();
+    timestampMsLookupMap.put(s, t);
+    return t;
+  }
+
+  public DbKey fromCsvLineTokens(String[] tokens) {
+    DbKey k = new DbKey();
+    // [0] is always "^SPX"
+
+    // [1] is quote_datetime
+
+    // [2] is root
+    var root = tokens[2];
+    final var n = root.length();
+    if (n < 5) {
+      var numSpaces = 5 - n;
+      for (int i = 0; i < numSpaces; ++i) {
+        root = root + " ";
+      }
+    }
+    k.root = root;
+
+    // [3] is expiration date
+    k.expirationDate = tokens[3];
+
+    // [4] is strike
+    k.strike = Integer.parseInt(tokens[4]);
+
+    // [5] is optionType
+    char optionType = tokens[5].charAt(0);
+    k.optionType = optionType;
+
+    return k;
   }
 
   public static int toDateStringInt(String s) {
