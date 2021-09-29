@@ -43,7 +43,7 @@ public final class DbValue {
     return Integer.parseInt(a + b);
   }
 
-  public static DbValue fromCsvLine(String[] tokens) {
+  public static DbValue fromCsvLineTokens(String[] tokens) {
     var v = new DbValue();
     v.i = 0;
 
