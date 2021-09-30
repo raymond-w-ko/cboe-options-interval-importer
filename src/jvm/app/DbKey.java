@@ -5,12 +5,16 @@ import java.nio.ByteOrder;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.joda.time.Instant;
 import org.apache.commons.collections4.map.LRUMap;
+import org.joda.time.Instant;
+import org.joda.time.format.DateTimeFormat;
+import org.joda.time.format.DateTimeFormatter;
+import org.apache.commons.lang3.StringUtils;
 
 public final class DbKey {
   private static LRUMap<String, Long> timestampMsLookupMap = new LRUMap<String, Long>(1024 * 1024);
-    
+  private static DateTimeFormatter dateTimeFormatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss");
+
   /// unix timestamp, in seconds
   public long quoteTimestamp;
   /// must be a string of a length of 5
@@ -38,39 +42,52 @@ public final class DbKey {
     this.expirationDate = expirationDate;
     this.strike = Integer.parseInt(strikeString);
   }
-  
+
   static long toTimestampMs(String s) {
     if (timestampMsLookupMap.containsKey(s)) {
       return timestampMsLookupMap.get(s);
     }
 
-    final long t = Instant.parse(s).getMillis();
+    final long t = Instant.parse(s, dateTimeFormatter).getMillis();
     timestampMsLookupMap.put(s, t);
     return t;
   }
 
-  public DbKey fromCsvLineTokens(String[] tokens) {
+  public static DbKey fromCsvLineTokens(String[] tokens) {
     DbKey k = new DbKey();
     // [0] is always "^SPX"
 
     // [1] is quote_datetime
+    k.quoteTimestamp = toTimestampMs(tokens[1]);
 
     // [2] is root
-    var root = tokens[2];
-    final var n = root.length();
-    if (n < 5) {
-      var numSpaces = 5 - n;
-      for (int i = 0; i < numSpaces; ++i) {
-        root = root + " ";
+    {
+      var root = tokens[2];
+      final var n = root.length();
+      if (n < 5) {
+        var numSpaces = 5 - n;
+        for (int i = 0; i < numSpaces; ++i) {
+          root = root + " ";
+        }
       }
+      k.root = root;
     }
-    k.root = root;
 
     // [3] is expiration date
     k.expirationDate = tokens[3];
 
     // [4] is strike
-    k.strike = Integer.parseInt(tokens[4]);
+    {
+      var strike = tokens[4];
+      final var n = strike.length();
+      final var suffix = strike.substring(n - 4, n);
+      if (suffix.equals(".000")) {
+        strike = strike.substring(0, n - 4);
+      } else {
+        throw new RuntimeException("strike suffix must be '.000', got input: " + strike);
+      }
+      k.strike = Integer.parseInt(strike);
+    }
 
     // [5] is optionType
     char optionType = tokens[5].charAt(0);
@@ -87,9 +104,9 @@ public final class DbKey {
   }
 
   public static String toDateString(int i) {
-    final String day = String.valueOf(i % 100);
+    final String day = StringUtils.leftPad(String.valueOf(i % 100), 2);
     i = i / 100;
-    final String month = String.valueOf(i % 100);
+    final String month = StringUtils.leftPad(String.valueOf(i % 100), 2);
     i = i / 100;
     final String year = String.valueOf(i);
     return year + "-" + month + "-" + day;
@@ -104,7 +121,7 @@ public final class DbKey {
     i += 8;
     buf.putStringWithoutLengthUtf8(i, root);
     i += 5;
-    buf.putChar(i, optionType);
+    buf.putByte(i, (byte)optionType);
     i += 1;
     buf.putInt(i, toDateStringInt(expirationDate), ByteOrder.BIG_ENDIAN);
     i += 4;
@@ -122,7 +139,7 @@ public final class DbKey {
     i += 8;
     k.root = buf.getStringWithoutLengthUtf8(i, 5);
     i += 5;
-    k.optionType = buf.getChar(i);
+    k.optionType = (char)buf.getByte(i);
     i += 1;
     k.expirationDate = toDateString(buf.getInt(i, ByteOrder.BIG_ENDIAN));
     i += 4;
