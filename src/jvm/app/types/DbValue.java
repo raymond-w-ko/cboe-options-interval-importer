@@ -1,4 +1,4 @@
-package app;
+package app.types;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
