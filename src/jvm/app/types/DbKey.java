@@ -1,4 +1,4 @@
-package app;
+package app.types;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -12,11 +12,11 @@ import org.joda.time.format.DateTimeFormatter;
 import org.apache.commons.lang3.StringUtils;
 
 public final class DbKey {
-  private static LRUMap<String, Long> timestampMsLookupMap = new LRUMap<String, Long>(1024 * 1024);
+  private static LRUMap<String, Instant> timestampMsLookupMap = new LRUMap<String, Instant>(1024 * 1024);
   private static DateTimeFormatter dateTimeFormatter = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss");
 
-  /// unix timestamp, in seconds
-  public long quoteTimestamp;
+  /// use joda time for instant
+  public org.joda.time.Instant quoteDateTime;
   /// must be a string of a length of 5
   public String root;
 
@@ -30,25 +30,12 @@ public final class DbKey {
 
   private DbKey() {}
 
-  public DbKey(
-      long quoteTimestamp,
-      String root,
-      char optionType,
-      String expirationDate,
-      String strikeString) {
-    this.quoteTimestamp = quoteTimestamp;
-    this.root = root;
-    this.optionType = optionType;
-    this.expirationDate = expirationDate;
-    this.strike = Integer.parseInt(strikeString);
-  }
-
-  static long toTimestampMs(String s) {
+  static Instant toJodaInstant(String s) {
     if (timestampMsLookupMap.containsKey(s)) {
       return timestampMsLookupMap.get(s);
     }
 
-    final long t = Instant.parse(s, dateTimeFormatter).getMillis();
+    final var t = Instant.parse(s, dateTimeFormatter);
     timestampMsLookupMap.put(s, t);
     return t;
   }
@@ -58,7 +45,7 @@ public final class DbKey {
     // [0] is always "^SPX"
 
     // [1] is quote_datetime
-    k.quoteTimestamp = toTimestampMs(tokens[1]);
+    k.quoteDateTime = toJodaInstant(tokens[1]);
 
     // [2] is root
     {
@@ -104,12 +91,24 @@ public final class DbKey {
   }
 
   public static String toDateString(int i) {
-    final String day = StringUtils.leftPad(String.valueOf(i % 100), 2);
+    final String day = StringUtils.leftPad(String.valueOf(i % 100), 2, "0");
     i = i / 100;
-    final String month = StringUtils.leftPad(String.valueOf(i % 100), 2);
+    final String month = StringUtils.leftPad(String.valueOf(i % 100), 2, "0");
     i = i / 100;
     final String year = String.valueOf(i);
     return year + "-" + month + "-" + day;
+  }
+  
+  public static ByteBuffer instantToByteBuffer(Instant t) {
+    final long ms = t.getMillis() / 1000;
+    final var buf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(ms);
+    return buf;
+  }
+  public static Instant byteBufferToInstant(DirectBuffer srcBuf, int i) {
+    final var dstBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
+    srcBuf.getBytes(i, dstBuf, 4, 4);
+    final long ms = dstBuf.getLong(0) * 1000;
+    return new Instant(ms);
   }
 
   public UnsafeBuffer toBuffer() {
@@ -117,8 +116,8 @@ public final class DbKey {
     final var buf = new UnsafeBuffer(bb);
     var i = 0;
 
-    buf.putLong(i, quoteTimestamp, ByteOrder.BIG_ENDIAN);
-    i += 8;
+    buf.putBytes(i, instantToByteBuffer(quoteDateTime), 4, 4);
+    i += 4;
     buf.putStringWithoutLengthUtf8(i, root);
     i += 5;
     buf.putByte(i, (byte)optionType);
@@ -135,8 +134,8 @@ public final class DbKey {
     final var k = new DbKey();
     var i = 0;
 
-    k.quoteTimestamp = buf.getLong(i, ByteOrder.BIG_ENDIAN);
-    i += 8;
+    k.quoteDateTime = byteBufferToInstant(buf, i);
+    i += 4;
     k.root = buf.getStringWithoutLengthUtf8(i, 5);
     i += 5;
     k.optionType = (char)buf.getByte(i);
