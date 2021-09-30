@@ -7,6 +7,9 @@
    [java.io LineNumberReader InputStreamReader BufferedReader FileWriter]
    [java.sql DriverManager Connection Statement PreparedStatement ResultSet]
    
+   [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
+    SeekOp Dbi DbiFlags PutFlags]
+   
    [app.types DbKey DbValue])
   (:require
    [fipp.edn :refer [pprint] :rename {pprint fipp}]
@@ -28,8 +31,7 @@
    [tick.alpha.api :as t]
 
    [app.macros :as mac :refer [->hash field cond-let]]
-   [app.utils :refer [get-zips zip->buffered-reader intern-date take-batch
-                      array-type]]
+   [app.utils :refer [get-zips zip->buffered-reader intern-date take-batch array-type]]
    [app.s3 :refer [get-object-keys
                    zip-object-key->line-seq]]
    [app.lmdb :as lmdb]))
@@ -49,10 +51,6 @@
         (debug "processing rate" (int rate) "items/sec"))
       (<! (timeout (* 10 1000)))
       (recur))))
-
-(defn create-args []
-  (let [*num-items (atom 0)]
-    (->hash *num-items)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -89,9 +87,9 @@
 (defn import-option-intervals [{:as args :keys [*num-items]}]
   (let [object-keys (->> (get-object-keys "spx/")
                          (filter #(str/includes? % "2020-"))
-                         (take 1)
-                         (sort))
-        interval-bundle-ch (chan 2)
+                         (sort)
+                         (take 1))
+        interval-bundle-ch (chan 8)
         args (mac/args interval-bundle-ch)]
     (thread
       (->> object-keys
@@ -105,8 +103,15 @@
         (swap! *num-items + (count intervals))
         (recur (<!! interval-bundle-ch))))))
 
+(defn create-args []
+  (let [*num-items (atom 0)
+        env (lmdb/create-write-env)
+        db (lmdb/open-db env)]
+    (->hash *num-items env db)))
+
 (defn run []
-  (let [args (create-args)]
+  (let [{:as args :keys [env]} (create-args)]
     (start-measurement-loop args)
-    (import-option-intervals args)
+    (with-open [^Dbi env env]
+      (import-option-intervals args))
     :done))
