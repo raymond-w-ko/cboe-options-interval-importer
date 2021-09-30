@@ -4,6 +4,7 @@
    [java.util.concurrent TimeUnit]
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
+   
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp DbiFlags PutFlags]
    [org.agrona MutableDirectBuffer]
@@ -11,6 +12,7 @@
    
    [app.types DbKey DbValue])
   (:require
+   [clojure.java.io :as io]
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
             logf tracef debugf infof warnf errorf fatalf reportf
@@ -102,4 +104,32 @@
     nil))
 (comment (read-db-value-buf))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn verify-lmdb []
+  (with-open [env (-> (Env/create ByteBufferProxy/PROXY_OPTIMAL)
+                      (.setMapSize (* 1024 1024 1024 512))
+                      (.setMaxDbs Verifier/DBI_COUNT)
+                      (.open (io/file "./lmdb-verifier")
+                             (into-array org.lmdbjava.EnvFlags [])))]
+    (let [v (new Verifier env)]
+      (debugf "verifier verified %d items" (.runFor v 3 TimeUnit/SECONDS)))))
+(comment (verify-lmdb))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn decode-from-db-test [env db]
+  (with-open [txn (.txnRead env)]
+    (with-open [c (.openCursor db txn)]
+      (.seek c SeekOp/MDB_FIRST)
+      (.seek c SeekOp/MDB_FIRST)
+      (let [key-buf (.key c)
+            db-key (DbKey/fromBuffer key-buf)]
+        (debug "\n"
+               "timestamp" (.-quoteDateTime db-key)
+               "root" (.-root db-key)
+               "\n"
+               "optionType" (.-optionType db-key)
+               "expirationDate" (.-expirationDate db-key)
+               "strike" (.-strike db-key))))))
