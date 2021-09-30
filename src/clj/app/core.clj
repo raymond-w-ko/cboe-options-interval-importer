@@ -7,10 +7,8 @@
    [tick.alpha.api :as t]
 
    ; [app.options :as options]
-   ; [app.option-intervals :as option-intervals]
    ; [app.prices :as prices]
-   
-   [app.lmdb]))
+   [app.option-intervals :as option-intervals]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -27,6 +25,6 @@
   (internal-consistency-check!)
 
   (println "BEGIN")
-  ; (option-intervals/run)
   ; (prices/run)
+  (option-intervals/run)
   (println "END"))
