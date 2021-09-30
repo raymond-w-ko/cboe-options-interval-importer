@@ -6,10 +6,12 @@
    [java.nio.charset Charset]
    [java.io LineNumberReader InputStreamReader BufferedReader FileWriter]
    [java.sql DriverManager Connection Statement PreparedStatement ResultSet]
-   
+
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp Dbi DbiFlags PutFlags]
-   
+   [org.joda.time Instant Period Days Duration]
+   [org.joda.time.format DateTimeFormat DateTimeFormatter]
+
    [app.types DbKey DbValue])
   (:require
    [fipp.edn :refer [pprint] :rename {pprint fipp}]
@@ -55,21 +57,57 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn process-line
-  [args ^String line]
-  (let [tokens (.split line ",")
-        db-key (DbKey/fromCsvLineTokens tokens)
+  [^String line]
+  (.split line ","))
+
+(defn convert-tokens-to-buffers
+  [tokens]
+  (let [db-key (DbKey/fromCsvLineTokens tokens)
         db-value (DbValue/fromCsvLineTokens tokens)]
     [(.toBuffer db-key) (.toBuffer db-value)]))
 
+(def quote-datetime-formatter (DateTimeFormat/forPattern "yyyy-MM-dd HH:mm:ss"))
+(def ->quote-datetime-instant
+  (let [C (cw/lru-cache-factory {} :threshold (* 1024 1024))
+        f (fn [s] (Instant/parse s quote-datetime-formatter))]
+    (fn [s]
+      (cw/lookup-or-miss C s f))))
+
+(def exp-date-formatter (DateTimeFormat/forPattern "yyyy-MM-dd"))
+(def ->expiration-date-instant
+  (let [C (cw/lru-cache-factory {} :threshold (* 1024 1024))
+        f (fn [s]
+            (-> (Instant/parse s exp-date-formatter)
+                ;; 4PM EST is when options expire
+                (.plus (new Duration (* (+ 12 4) 60 60 1000)))))]
+    (fn [s]
+      (cw/lookup-or-miss C s f))))
+
+(defn is-dte-in-range? [max-dte ^"[Ljava.lang.String;" tokens]
+  (let [^Instant now (-> (field tokens "quote_datetime")
+                         (->quote-datetime-instant))
+        ^Instant dte (-> (field tokens "expiration")
+                         (->expiration-date-instant))
+        days (-> (Days/daysBetween now dte)
+                 .getDays)]
+    ; (debug (.toMutableDateTime now))
+    ; (debug (.toMutableDateTime dte))
+    (< days max-dte)))
+(comment
+  (is-dte-in-range? (+ 30 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-01-31"]))
+  (is-dte-in-range? (+ 30 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-06-30"])))
+
 (defn process-zip
   "Assumes that this runs in separate thread."
-  [{:as args :keys [interval-bundle-ch]} zip-object-key]
+  [{:keys [interval-bundle-ch]} zip-object-key]
   (info "processing zip-object-key" zip-object-key)
   (let [{:keys [lines ^ZipInputStream zip-stream]}
         (zip-object-key->line-seq zip-object-key)
 
         xf (comp (drop 1)
-                 (map (partial process-line args))
+                 (map process-line)
+                 (filter (partial is-dte-in-range? (+ 1 31 31)))
+                 (map convert-tokens-to-buffers)
                  (partition-all 10000))
         items (eduction xf lines)]
     (loop [x (first items)
