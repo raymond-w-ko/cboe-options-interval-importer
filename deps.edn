@@ -30,6 +30,7 @@
   org.glassfish.jaxb/jaxb-core {:mvn/version "3.0.2"}
 
   org.apache.commons/commons-collections4 {:mvn/version "4.4"}
+  org.apache.commons/commons-lang3 {:mvn/version "3.12.0"}
   joda-time/joda-time {:mvn/version "2.10.11"}
   virgil/virgil {:mvn/version "0.1.9"}
   badigeon/badigeon {:mvn/version "1.7"}
