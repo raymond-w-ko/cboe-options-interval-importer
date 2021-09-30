@@ -20,8 +20,8 @@
   org.mariadb.jdbc/mariadb-java-client {:mvn/version "2.7.4"}
 
   ; software.amazon.awssdk/s3 {:mvn/version "2.17.46"}
-  com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.74"}
-  com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.74"}
+  com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.77"}
+  com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.77"}
   ;; this requires AWS SDK v1
   com.github.alexmojaki/s3-stream-upload {:mvn/version "2.2.2"}
 
@@ -31,7 +31,7 @@
 
   org.apache.commons/commons-collections4 {:mvn/version "4.4"}
   org.apache.commons/commons-lang3 {:mvn/version "3.12.0"}
-  joda-time/joda-time {:mvn/version "2.10.11"}
+  joda-time/joda-time {:mvn/version "2.10.12"}
   virgil/virgil {:mvn/version "0.1.9"}
   badigeon/badigeon {:mvn/version "1.7"}
   com.clojure-goes-fast/clj-java-decompiler {:mvn/version "0.3.0"}
