@@ -33,14 +33,16 @@ public final class DbValue {
   }
 
   public static int priceStringToInt(String s) {
-    final var n = s.length();
-    final char ch = s.charAt(n - 3);
-    if (ch != '.') {
-      throw new RuntimeException("third to last char must be a period");
-    }
-    final String a = s.substring(0, n - 3);
-    final String b = s.substring(n - 2, n);
-    return Integer.parseInt(a + b);
+    // final var n = s.length();
+    // final char ch = s.charAt(n - 3);
+    // if (ch != '.') {
+    //   throw new RuntimeException("third to last char must be a period");
+    // }
+    // final String a = s.substring(0, n - 3);
+    // final String b = s.substring(n - 2, n);
+    // return Integer.parseInt(a + b);
+    final var f = Float.parseFloat(s) * 100;
+    return (int)Math.floor(f);
   }
 
   public static DbValue fromCsvLineTokens(String[] tokens) {
