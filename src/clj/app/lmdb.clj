@@ -8,9 +8,8 @@
     SeekOp DbiFlags PutFlags]
    [org.agrona MutableDirectBuffer]
    [org.agrona.concurrent UnsafeBuffer]
-
-   app.DbKey
-   app.DbValue)
+   
+   [app.types DbKey DbValue])
   (:require
    [app.macros :refer [cond-xlet]]
    [clojure.java.io :as io]
@@ -121,67 +120,9 @@
       (let [key-buf (.key c)
             db-key (DbKey/fromBuffer key-buf)]
         (debug "\n"
-               "timestamp" (.-quoteTimestamp db-key)
+               "timestamp" (.-quoteDateTime db-key)
                "root" (.-root db-key)
                "\n"
                "optionType" (.-optionType db-key)
                "expirationDate" (.-expirationDate db-key)
                "strike" (.-strike db-key))))))
-
-(defn --repl []
-  (verify)
-  ; (test-rw)
-  (print-stats)
-
-  (DbValue/priceStringToInt "100.251")
-  (DbValue/priceStringToInt "100.25")
-  (DbValue/priceStringToInt "-100.25")
-
-  (let [t (-> (Instant/now) .getEpochSecond)
-        db-key (new DbKey t "SPXPM" \P "2020-12-31" "5000")]
-    (spit-buffer "key.hex" (.toBuffer db-key)))
-  (let [barr (path->bytes "key.hex")
-        buf (new UnsafeBuffer barr)
-        db-key (DbKey/fromBuffer buf)]
-    (debug "\n"
-           "timestamp" (.-quoteTimestamp db-key) "root" (.-root db-key)
-           "strike" (.-strike db-key))
-    (debug "\n"
-           "optionType" (.-optionType db-key) "expirationDate" (.-expirationDate db-key))
-    nil)
-
-  (let [x (into-array
-           ["" "" "" "" "" ""
-            ;; open, high, low, close
-            "1.23" "2.34" "3.45" "4.56"
-            ;; vol, BS, bid, AS, ask
-            "42" "1" "0.99" "2" "1.01"
-            ;; ubid, uask
-            "99.99" "100.01"
-
-            ;; iuprice, uprice
-            "101.02" "100.00"
-
-            ;; iv, greeks
-            "0.16" "0.50" "0.03" "0.01" "0.02" "0.03"
-
-            "69"])
-        db-v (DbValue/fromCsvLineTokens x)]
-    (spit-buffer "value.hex" (.toBuffer db-v)))
-
-  (let [barr (path->bytes "value.hex")
-        buf (new UnsafeBuffer barr)
-        db-v (DbValue/fromBuffer buf)]
-    (debug (.-open db-v) (.-high db-v) (.-low db-v) (.-close db-v))
-    (debug (.-trade_volume db-v) (.-bid_size db-v) (.-bid db-v) (.-ask_size db-v) (.-ask db-v))
-    (debug (.-underlying_bid db-v) (.-underlying_ask db-v))
-    (debug (.-implied_underlying_price db-v) (.-active_underlying_price db-v))
-    (debug (.-implied_volatility db-v)
-           (.-delta db-v) (.-gamma db-v) (.-theta db-v) (.-vega db-v) (.-rho db-v))
-    (debug (.-open_interest db-v))
-    nil)
-  
-  (decode-from-db-test)
-
-  nil)
-(comment (--repl))
