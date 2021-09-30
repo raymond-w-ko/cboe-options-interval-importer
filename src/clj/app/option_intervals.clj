@@ -7,8 +7,7 @@
    [java.io LineNumberReader InputStreamReader BufferedReader FileWriter]
    [java.sql DriverManager Connection Statement PreparedStatement ResultSet]
    
-   app.DbKey
-   app.DbValue)
+   [app.types DbKey DbValue])
   (:require
    [fipp.edn :refer [pprint] :rename {pprint fipp}]
    [clojure.java.io :as io]
