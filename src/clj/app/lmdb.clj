@@ -4,7 +4,7 @@
    [java.util.concurrent TimeUnit]
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
-   [org.lmdbjava Env DirectBufferProxy Verifier ByteBufferProxy Txn
+   [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp DbiFlags PutFlags]
    [org.agrona MutableDirectBuffer]
    [org.agrona.concurrent UnsafeBuffer]
@@ -20,17 +20,24 @@
             logf tracef debugf infof warnf errorf fatalf reportf
             spy get-env]]))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (set! *warn-on-reflection* true)
 (set! *unchecked-math* :warn-on-boxed)
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def dangerous-env-flags
+  (into-array org.lmdbjava.EnvFlags [EnvFlags/MDB_FIXEDMAP
+                                     EnvFlags/MDB_MAPASYNC
+                                     EnvFlags/MDB_NOMETASYNC
+                                     EnvFlags/MDB_NOSYNC
+                                     ; EnvFlags/MDB_NORDAHEAD
+                                     ]))
 (def db-max-size (* 1024 1024 1024 512))
 (defonce ^org.lmdbjava.Env env
   (-> (Env/create DirectBufferProxy/PROXY_DB)
       (.setMapSize db-max-size)
       (.setMaxDbs 1)
-      (.open (io/file "./lmdb") (into-array org.lmdbjava.EnvFlags []))))
+      (.open (io/file "./lmdb") dangerous-env-flags)))
 (defonce ^org.lmdbjava.Dbi db
   (.openDbi
    env "SPX"
@@ -59,28 +66,28 @@
       (debug "pageSize" (.-pageSize stat))
       nil)))
 
-(defn test-rw []
-  (let [key-bb (ByteBuffer/allocateDirect (.getMaxKeySize env))
-        val-bb (ByteBuffer/allocateDirect 1024)
-        ^MutableDirectBuffer k (new UnsafeBuffer key-bb)
-        ^MutableDirectBuffer v (new UnsafeBuffer val-bb)
+; (defn test-rw []
+;   (let [key-bb (ByteBuffer/allocateDirect (.getMaxKeySize env))
+;         val-bb (ByteBuffer/allocateDirect 1024)
+;         ^MutableDirectBuffer k (new UnsafeBuffer key-bb)
+;         ^MutableDirectBuffer v (new UnsafeBuffer val-bb)
 
-        put-flags (into-array PutFlags [])]
-    (with-open [txn (.txnWrite env)]
-      (with-open [c (.openCursor db txn)]
-        (.putStringWithoutLengthUtf8 k 0 "foo")
-        (.putStringWithoutLengthUtf8 v 0 "bar")
-        (.put c k v put-flags))
-      (.commit txn))
+;         put-flags (into-array PutFlags [])]
+;     (with-open [txn (.txnWrite env)]
+;       (with-open [c (.openCursor db txn)]
+;         (.putStringWithoutLengthUtf8 k 0 "foo")
+;         (.putStringWithoutLengthUtf8 v 0 "bar")
+;         (.put c k v put-flags))
+;       (.commit txn))
 
-    (print-stats)
+;     (print-stats)
 
-    (with-open [txn (.txnWrite env)]
-      (with-open [c (.openCursor db txn)]
-        (.delete db txn k))
-      (.commit txn))
+;     (with-open [txn (.txnWrite env)]
+;       (with-open [c (.openCursor db txn)]
+;         (.delete db txn k))
+;       (.commit txn))
 
-    (print-stats)))
+;     (print-stats)))
 
 (defn spit-buffer [fname ^UnsafeBuffer buf]
   (with-open [f (io/output-stream fname)]
@@ -95,9 +102,35 @@
      (io/copy in out)
      (.toByteArray out))))
 
+(defn put-buffers [xs]
+  (let [put-flags (into-array PutFlags [])]
+    (with-open [txn (.txnWrite env)]
+      (with-open [c (.openCursor db txn)]
+        (dorun
+         (for [[key-buf val-buf] xs]
+           (.put c key-buf val-buf put-flags))))
+      (.commit txn))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn decode-from-db-test []
+  (with-open [txn (.txnRead env)]
+    (with-open [c (.openCursor db txn)]
+      (.seek c SeekOp/MDB_FIRST)
+      (.seek c SeekOp/MDB_FIRST)
+      (let [key-buf (.key c)
+            db-key (DbKey/fromBuffer key-buf)]
+        (debug "\n"
+               "timestamp" (.-quoteTimestamp db-key)
+               "root" (.-root db-key)
+               "\n"
+               "optionType" (.-optionType db-key)
+               "expirationDate" (.-expirationDate db-key)
+               "strike" (.-strike db-key))))))
+
 (defn --repl []
   (verify)
-  (test-rw)
+  ; (test-rw)
   (print-stats)
 
   (DbValue/priceStringToInt "100.251")
@@ -107,6 +140,15 @@
   (let [t (-> (Instant/now) .getEpochSecond)
         db-key (new DbKey t "SPXPM" \P "2020-12-31" "5000")]
     (spit-buffer "key.hex" (.toBuffer db-key)))
+  (let [barr (path->bytes "key.hex")
+        buf (new UnsafeBuffer barr)
+        db-key (DbKey/fromBuffer buf)]
+    (debug "\n"
+           "timestamp" (.-quoteTimestamp db-key) "root" (.-root db-key)
+           "strike" (.-strike db-key))
+    (debug "\n"
+           "optionType" (.-optionType db-key) "expirationDate" (.-expirationDate db-key))
+    nil)
 
   (let [x (into-array
            ["" "" "" "" "" ""
@@ -138,6 +180,8 @@
            (.-delta db-v) (.-gamma db-v) (.-theta db-v) (.-vega db-v) (.-rho db-v))
     (debug (.-open_interest db-v))
     nil)
+  
+  (decode-from-db-test)
 
   nil)
 (comment (--repl))
