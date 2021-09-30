@@ -4,11 +4,12 @@
    [java.util.concurrent TimeUnit]
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
-   [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
+   [org.lmdbjava
+    Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn Stat
     SeekOp DbiFlags PutFlags]
    [org.agrona MutableDirectBuffer]
    [org.agrona.concurrent UnsafeBuffer]
-   
+
    [app.types DbKey DbValue])
   (:require
    [app.macros :refer [cond-xlet]]
@@ -24,69 +25,56 @@
 (set! *unchecked-math* :warn-on-boxed)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def dangerous-env-flags
-  (into-array org.lmdbjava.EnvFlags [EnvFlags/MDB_FIXEDMAP
-                                     EnvFlags/MDB_MAPASYNC
-                                     EnvFlags/MDB_NOMETASYNC
-                                     EnvFlags/MDB_NOSYNC
-                                     ; EnvFlags/MDB_NORDAHEAD
-                                     ]))
 (def db-max-size (* 1024 1024 1024 512))
-(defonce ^org.lmdbjava.Env env
-  (-> (Env/create DirectBufferProxy/PROXY_DB)
-      (.setMapSize db-max-size)
-      (.setMaxDbs 1)
-      (.open (io/file "./lmdb") dangerous-env-flags)))
-(defonce ^org.lmdbjava.Dbi db
-  (.openDbi
-   env "SPX"
-   ^"[Lorg.lmdbjava.DbiFlags;" (into-array org.lmdbjava.DbiFlags [DbiFlags/MDB_CREATE])))
+(def normal-env-flags (into-array org.lmdbjava.EnvFlags []))
+(def dangerous-fast-write-env-flags
+  (into-array org.lmdbjava.EnvFlags
+              [EnvFlags/MDB_FIXEDMAP
+               EnvFlags/MDB_MAPASYNC
+               EnvFlags/MDB_NOMETASYNC
+               EnvFlags/MDB_NOSYNC
+               EnvFlags/MDB_NORDAHEAD]))
+(defn create-read-env
+  (^org.lmdbjava.Env
+   []
+   (-> (Env/create DirectBufferProxy/PROXY_DB)
+       (.setMapSize db-max-size)
+       (.setMaxDbs 1)
+       (.open (io/file "./lmdb") normal-env-flags))))
+(defn  create-write-env
+  (^org.lmdbjava.Env
+   []
+   (-> (Env/create DirectBufferProxy/PROXY_DB)
+       (.setMapSize db-max-size)
+       (.setMaxDbs 1)
+       (.open (io/file "./lmdb") dangerous-fast-write-env-flags))))
 
-(defn verify []
-  (let [env
-        (-> (Env/create ByteBufferProxy/PROXY_OPTIMAL)
-            (.setMapSize (* 1024 1024 1024 512))
-            (.setMaxDbs Verifier/DBI_COUNT)
-            (.open (io/file "./lmdb-verifier") (into-array org.lmdbjava.EnvFlags [])))
-        v (new Verifier env)]
-    (debugf "verifier verified %d items" (.runFor v 3 TimeUnit/SECONDS))
-    (.close env)))
+(def ^"[Lorg.lmdbjava.DbiFlags;" normal-db-flags
+  (into-array org.lmdbjava.DbiFlags [DbiFlags/MDB_CREATE]))
+(defn open-db
+  (^org.lmdbjava.Dbi
+   [^org.lmdbjava.Env env]
+   (.openDbi env "SPX" normal-db-flags)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn print-stats []
+(defn ^Stat get-stats
+  [^org.lmdbjava.Env env
+   ^org.lmdbjava.Dbi db]
   (with-open [txn (.txnRead env)]
     (let [stat (.stat db txn)]
-      (debug "branchPages" (.-branchPages stat))
-      (debug "depth" (.-depth stat))
-      (debug "entries" (.-entries stat))
-      (debug "leafPages" (.-leafPages stat))
-      (debug "overflowPages" (.-overflowPages stat))
-      (debug "pageSize" (.-pageSize stat))
-      nil)))
+      stat)))
 
-; (defn test-rw []
-;   (let [key-bb (ByteBuffer/allocateDirect (.getMaxKeySize env))
-;         val-bb (ByteBuffer/allocateDirect 1024)
-;         ^MutableDirectBuffer k (new UnsafeBuffer key-bb)
-;         ^MutableDirectBuffer v (new UnsafeBuffer val-bb)
-
-;         put-flags (into-array PutFlags [])]
-;     (with-open [txn (.txnWrite env)]
-;       (with-open [c (.openCursor db txn)]
-;         (.putStringWithoutLengthUtf8 k 0 "foo")
-;         (.putStringWithoutLengthUtf8 v 0 "bar")
-;         (.put c k v put-flags))
-;       (.commit txn))
-
-;     (print-stats)
-
-;     (with-open [txn (.txnWrite env)]
-;       (with-open [c (.openCursor db txn)]
-;         (.delete db txn k))
-;       (.commit txn))
-
-;     (print-stats)))
+(defn print-stats
+  [env db]
+  (let [stat (get-stats env db)]
+    (debug "branchPages" (.-branchPages stat))
+    (debug "depth" (.-depth stat))
+    (debug "entries" (.-entries stat))
+    (debug "leafPages" (.-leafPages stat))
+    (debug "overflowPages" (.-overflowPages stat))
+    (debug "pageSize" (.-pageSize stat))))
 
 (defn spit-buffer [fname ^UnsafeBuffer buf]
   (with-open [f (io/output-stream fname)]
@@ -101,28 +89,17 @@
      (io/copy in out)
      (.toByteArray out))))
 
-(defn put-buffers [xs]
+(defn put-buffers
+  "pairs is a sequence of [key-buffer, value-buffer]."
+  [^org.lmdbjava.Env env
+   ^org.lmdbjava.Dbi db
+   pairs]
   (let [put-flags (into-array PutFlags [])]
     (with-open [txn (.txnWrite env)]
       (with-open [c (.openCursor db txn)]
-        (dorun
-         (for [[key-buf val-buf] xs]
-           (.put c key-buf val-buf put-flags))))
+        (letfn [(f [[key-buf val-buf]]
+                  (.put c key-buf val-buf put-flags))]
+          (dorun (map f pairs))))
       (.commit txn))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn decode-from-db-test []
-  (with-open [txn (.txnRead env)]
-    (with-open [c (.openCursor db txn)]
-      (.seek c SeekOp/MDB_FIRST)
-      (.seek c SeekOp/MDB_FIRST)
-      (let [key-buf (.key c)
-            db-key (DbKey/fromBuffer key-buf)]
-        (debug "\n"
-               "timestamp" (.-quoteDateTime db-key)
-               "root" (.-root db-key)
-               "\n"
-               "optionType" (.-optionType db-key)
-               "expirationDate" (.-expirationDate db-key)
-               "strike" (.-strike db-key))))))
