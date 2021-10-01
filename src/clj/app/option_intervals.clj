@@ -108,7 +108,7 @@
 
         xf (comp (drop 1)
                  (map process-line)
-                 (filter (partial is-dte-in-range? (+ 1 31 31)))
+                 (filter (partial is-dte-in-range? (+ 1 31)))
                  (map convert-tokens-to-buffers)
                  (partition-all 10000))
         items (eduction xf lines)]
@@ -124,9 +124,21 @@
 (defn load-interval-data [{:keys [env db]} intervals]
   (lmdb/put-buffers env db intervals))
 
+(defn >=-than-year? [year path]
+  (let [a (str/last-index-of path "/")
+        path (subs path (inc a))
+        b (str/index-of path "-")
+        path (subs path 0 b)
+        c (str/last-index-of path "_")
+        token (subs path (inc c))]
+    (>= (Integer/parseInt token) year)))
+(comment
+  (->> (get-object-keys "spx/")
+       (filter (partial >=-than-year? 2016))))
+
 (defn import-option-intervals [{:as args :keys [*num-items]}]
   (let [object-keys (->> (get-object-keys "spx/")
-                         (filter #(str/includes? % "2020-"))
+                         (filter (partial >=-than-year? 2016))
                          (sort)
                          (take 1))
         interval-bundle-ch (chan 8)
@@ -145,7 +157,7 @@
 
 (defn create-args []
   (let [*num-items (atom 0)
-        env (lmdb/create-write-env)
+        env (lmdb/create-write-env "./dbs/spx")
         db (lmdb/open-db env)]
     (->hash *num-items env db)))
 

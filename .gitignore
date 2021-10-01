@@ -14,5 +14,8 @@ config.clj
 /all-options.edn
 
 # lmdb
-/lmdb*
+/lmdb-verifier
 /*.hex
+
+# dbs
+/dbs/*

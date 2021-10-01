@@ -36,25 +36,29 @@
                EnvFlags/MDB_NORDAHEAD]))
 (defn create-read-env
   (^org.lmdbjava.Env
-   []
+   [^String db-dir]
    (-> (Env/create DirectBufferProxy/PROXY_DB)
        (.setMapSize db-max-size)
        (.setMaxDbs 1)
-       (.open (io/file "./lmdb") normal-read-env-flags))))
+       (.open (io/file db-dir) normal-read-env-flags))))
 (defn  create-write-env
   (^org.lmdbjava.Env
-   []
+   [^String db-dir]
    (-> (Env/create DirectBufferProxy/PROXY_DB)
        (.setMapSize db-max-size)
        (.setMaxDbs 1)
-       (.open (io/file "./lmdb") dangerous-fast-write-env-flags))))
+       (.open (io/file db-dir) dangerous-fast-write-env-flags))))
 
 (def ^"[Lorg.lmdbjava.DbiFlags;" normal-db-flags
   (into-array org.lmdbjava.DbiFlags [DbiFlags/MDB_CREATE]))
 (defn open-db
   (^org.lmdbjava.Dbi
    [^org.lmdbjava.Env env]
-   (.openDbi env "SPX" normal-db-flags)))
+   (.openDbi env "main" normal-db-flags))
+  (^org.lmdbjava.Dbi
+   [^org.lmdbjava.Env env
+    ^String db-name]
+   (.openDbi env db-name normal-db-flags)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
