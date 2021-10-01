@@ -18,6 +18,16 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn iter-seq
+  ([iterable] 
+    (iter-seq iterable (.iterator iterable)))
+  ([iterable i] 
+    (lazy-seq 
+      (when (.hasNext i)
+        (cons (.next i) (iter-seq iterable i))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn array-type
   "Return a string representing the type of an array with dims
   dimentions and an element of type klass.
