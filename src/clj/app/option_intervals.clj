@@ -94,8 +94,10 @@
     ; (debug (.toMutableDateTime dte))
     (< days max-dte)))
 (comment
-  (is-dte-in-range? (+ 30 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-01-31"]))
-  (is-dte-in-range? (+ 30 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-06-30"])))
+  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-01-31"]))
+  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-06-30"]))
+  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-02"]))
+  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-17"])))
 
 (defn process-zip
   "Assumes that this runs in separate thread."
@@ -119,8 +121,8 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn load-interval-data [args intervals]
-  (lmdb/put-buffers intervals))
+(defn load-interval-data [{:keys [env db]} intervals]
+  (lmdb/put-buffers env db intervals))
 
 (defn import-option-intervals [{:as args :keys [*num-items]}]
   (let [object-keys (->> (get-object-keys "spx/")
@@ -150,6 +152,6 @@
 (defn run []
   (let [{:as args :keys [env]} (create-args)]
     (start-measurement-loop args)
-    (with-open [^Dbi env env]
+    (with-open [^Env env env]
       (import-option-intervals args))
     :done))
