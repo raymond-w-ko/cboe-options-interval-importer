@@ -1,24 +1,25 @@
 (ns app.repl
   (:import
-   [java.time Instant]
    [java.util.concurrent TimeUnit]
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
    
+   [org.joda.time Instant]
+   
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
-    SeekOp DbiFlags PutFlags]
+    SeekOp DbiFlags PutFlags KeyRange]
    [org.agrona MutableDirectBuffer]
    [org.agrona.concurrent UnsafeBuffer]
    
-   [app.types DbKey DbValue])
+   [app.types DbKey DbValue Utils])
   (:require
    [clojure.java.io :as io]
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
             logf tracef debugf infof warnf errorf fatalf reportf
             spy get-env]]
-   [app.lmdb :refer [spit-buffer
-                     path->bytes]]))
+   [app.utils :refer [iter-seq]]
+   [app.lmdb :as lmdb :refer [spit-buffer path->bytes]]))
 
 (defn sort-roots []
   (->> (slurp "roots.edn")
@@ -39,9 +40,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn price-conversion []
-  (DbValue/priceStringToInt "100.251")
-  (DbValue/priceStringToInt "100.25")
-  (DbValue/priceStringToInt "-100.25"))
+  (Utils/ParsePriceString "100.251")
+  (Utils/ParsePriceString "100.25")
+  (Utils/ParsePriceString "-100.25"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -119,17 +120,71 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn decode-from-db-test [env db]
-  (with-open [txn (.txnRead env)]
-    (with-open [c (.openCursor db txn)]
+(defn print-key [db-key]
+  (debug "timestamp" (.toMutableDateTime (.-quoteDateTime db-key))
+         "root" (.-root db-key)
+         "optionType" (.-optionType db-key)
+         "expirationDate" (.-expirationDate db-key)
+         "strike" (.-strike db-key)))
+
+(defonce *first-db-key (atom nil))
+(defn decode-from-db-test []
+  (let [env (lmdb/create-read-env)
+        db (lmdb/open-db env)]
+    (with-open [txn (.txnRead env)
+                c (.openCursor db txn)]
       (.seek c SeekOp/MDB_FIRST)
-      (.seek c SeekOp/MDB_FIRST)
+      (.seek c SeekOp/MDB_NEXT)
       (let [key-buf (.key c)
             db-key (DbKey/fromBuffer key-buf)]
-        (debug "\n"
-               "timestamp" (.-quoteDateTime db-key)
-               "root" (.-root db-key)
-               "\n"
-               "optionType" (.-optionType db-key)
-               "expirationDate" (.-expirationDate db-key)
-               "strike" (.-strike db-key))))))
+        (reset! *first-db-key db-key)
+        (print-key db-key)))
+    (.close env)))
+(comment (decode-from-db-test))
+
+(defn seek-from-db-test []
+  (let [env (lmdb/create-read-env)
+        db (lmdb/open-db env)]
+    (with-open [txn (.txnRead env)]
+      (let [begin-range-key
+            (let [k (new DbKey)]
+              (set! (.-quoteDateTime k)
+                    (.-quoteDateTime @*first-db-key))
+              (set! (.-root k) "SPXW  ")
+              (set! (.-optionType k) \P)
+              (set! (.-expirationDate k) "0000-00-00")
+              (.toBuffer k))
+            end-range-key
+            (let [k (new DbKey)]
+              (set! (.-quoteDateTime k)
+                    (Instant/parse "2020-01-02T09:32:00.000-05:00"))
+              (set! (.-root k) "      ")
+              (set! (.-optionType k) \P)
+              (set! (.-expirationDate k) "0000-00-00")
+              (.toBuffer k))
+            iterable (.iterate db txn (KeyRange/closedOpen begin-range-key end-range-key))
+            xs (iter-seq iterable)]
+        (->> xs
+             (map (fn [x]
+                    (-> (.key x)
+                        (DbKey/fromBuffer)
+                        (print-key))))
+             (dorun))
+        ; (loop [flag (.hasNext iter)]
+        ;   (when flag
+        ;     (let [x (.next iter)]
+        ;       (-> (.key x)
+        ;           (DbKey/fromBuffer)
+        ;           (print-key)))
+        ;     (recur (.hasNext iter))))
+        ; (spit "key1.hex" (DbKey/UnsafeBufferToHex (.key (first xs))))
+        ; (spit "key2.hex" (DbKey/UnsafeBufferToHex (.key (second xs))))
+        ; (debug (.capacity (.key (first xs))))
+        ; (spit "dump.txt" (with-out-str (dorun (map #(-> % .key DbKey/fromBuffer print-key) xs))))
+        ; (spit "dump.txt" (->> (map #(-> % .key DbKey/UnsafeBufferToHex) xs)
+        ;                       (interpose "\n")
+        ;                       (apply str)))
+        nil))
+    (.close env)))
+(comment (decode-from-db-test))
+(comment (seek-from-db-test))
