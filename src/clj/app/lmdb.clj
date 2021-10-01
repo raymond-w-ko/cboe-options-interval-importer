@@ -26,7 +26,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def db-max-size (* 1024 1024 1024 512))
-(def normal-env-flags (into-array org.lmdbjava.EnvFlags []))
+(def normal-read-env-flags (into-array org.lmdbjava.EnvFlags [EnvFlags/MDB_RDONLY_ENV]))
 (def dangerous-fast-write-env-flags
   (into-array org.lmdbjava.EnvFlags
               [EnvFlags/MDB_FIXEDMAP
@@ -40,7 +40,7 @@
    (-> (Env/create DirectBufferProxy/PROXY_DB)
        (.setMapSize db-max-size)
        (.setMaxDbs 1)
-       (.open (io/file "./lmdb") normal-env-flags))))
+       (.open (io/file "./lmdb") normal-read-env-flags))))
 (defn  create-write-env
   (^org.lmdbjava.Env
    []
@@ -89,17 +89,19 @@
      (io/copy in out)
      (.toByteArray out))))
 
+(def put-buffer-flags (into-array PutFlags [PutFlags/MDB_NOOVERWRITE]))
 (defn put-buffers
   "pairs is a sequence of [key-buffer, value-buffer]."
   [^org.lmdbjava.Env env
    ^org.lmdbjava.Dbi db
    pairs]
-  (let [put-flags (into-array PutFlags [])]
-    (with-open [txn (.txnWrite env)]
-      (with-open [c (.openCursor db txn)]
-        (letfn [(f [[key-buf val-buf]]
-                  (.put c key-buf val-buf put-flags))]
-          (dorun (map f pairs))))
-      (.commit txn))))
+  (with-open [txn (.txnWrite env)]
+    (with-open [c (.openCursor db txn)]
+      (letfn [(f [[key-buf val-buf]]
+                (let [success (.put c key-buf val-buf put-buffer-flags)]
+                  (when-not success
+                    (throw (new RuntimeException "duplicate key")))))]
+        (dorun (map f pairs))))
+    (.commit txn)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
