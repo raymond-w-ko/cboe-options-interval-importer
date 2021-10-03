@@ -1,10 +1,11 @@
 IMAGE := 237991343424.dkr.ecr.us-east-1.amazonaws.com/cboe:latest
+JVM_ARGS := -J-Djdk.attach.allowAttachSelf
 CLJ_EXTRA_SAFETY_ARGS := -J-Dclojure.core.async.go-checking=true
 
 repl:
-	clojure $(CLJ_EXTRA_SAFETY_ARGS) -M:repl
+	clojure $(JVM_ARGS) $(CLJ_EXTRA_SAFETY_ARGS) -M:repl
 run:
-	clojure -J-Xmx16G -M:none -m app.core
+	clojure $(JVM_ARGS) -J-Xmx16G -M:none -m app.core
 upgrade-deps:
 	clojure -M:outdated --upgrade
 javac:
