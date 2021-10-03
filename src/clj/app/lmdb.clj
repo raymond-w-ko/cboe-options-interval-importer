@@ -61,7 +61,6 @@
     ^String db-name]
    (.openDbi env db-name normal-db-flags)))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn ^Stat get-stats
