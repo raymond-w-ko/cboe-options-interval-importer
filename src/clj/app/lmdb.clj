@@ -25,8 +25,9 @@
 (set! *unchecked-math* :warn-on-boxed)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def db-max-size (* 1024 1024 1024 512))
-(def normal-read-env-flags (into-array org.lmdbjava.EnvFlags [EnvFlags/MDB_RDONLY_ENV]))
+(def db-max-size (* 1024 1024 1024 575))
+(def normal-read-env-flags (into-array org.lmdbjava.EnvFlags
+                                       [EnvFlags/MDB_RDONLY_ENV]))
 (def dangerous-fast-write-env-flags
   (into-array org.lmdbjava.EnvFlags
               [EnvFlags/MDB_FIXEDMAP
@@ -102,9 +103,8 @@
   (with-open [txn (.txnWrite env)]
     (with-open [c (.openCursor db txn)]
       (letfn [(f [[key-buf val-buf]]
-                (let [success (.put c key-buf val-buf put-buffer-flags)]
-                  (when-not success
-                    (throw (new RuntimeException "duplicate key")))))]
+                (when-not (.get db txn key-buf)
+                  (.put c key-buf val-buf put-buffer-flags)))]
         (dorun (map f pairs))))
     (.commit txn)))
 
