@@ -44,18 +44,6 @@
 (set! *warn-on-reflection* true)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn start-measurement-loop [{:keys [*num-items]}]
-  (let [start-instant (System/currentTimeMillis)]
-    (go-loop []
-      (let [ms (- (System/currentTimeMillis) start-instant)
-            sec (/ ms 1000.0)
-            rate (/ @*num-items sec)]
-        (debug "processing rate" (int rate) "items/sec"))
-      (<! (timeout (* 10 1000)))
-      (recur))))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 (defn process-line
   [^String line]
   (.split line ","))
@@ -83,21 +71,27 @@
     (fn [s]
       (cw/lookup-or-miss C s f))))
 
-(defn is-dte-in-range? [max-dte ^"[Ljava.lang.String;" tokens]
-  (let [^Instant now (-> (field tokens "quote_datetime")
-                         (->quote-datetime-instant))
-        ^Instant dte (-> (field tokens "expiration")
-                         (->expiration-date-instant))
-        days (-> (Days/daysBetween now dte)
-                 .getDays)]
-    ; (debug (.toMutableDateTime now))
-    ; (debug (.toMutableDateTime dte))
-    (< days max-dte)))
+(def is-dte-in-range?
+  (let [C (cw/lru-cache-factory {} :threshold (* 1024 1024))
+        f (fn [[max-dte now dte]]
+            (let [^Instant now (->quote-datetime-instant now)
+                  ^Instant dte (->expiration-date-instant dte)
+                  days (-> (Days/daysBetween now dte)
+                           .getDays)]
+              (< days max-dte)))]
+    (fn [max-dte now exp-dte]
+      (cw/lookup-or-miss C [max-dte now exp-dte] f))))
+
+(defn is-line-in-dte-range? [max-dte ^"[Ljava.lang.String;" tokens]
+  (let [now (field tokens "quote_datetime")
+        dte (field tokens "expiration")]
+    (is-dte-in-range? max-dte now dte)))
+   
 (comment
-  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-01-31"]))
-  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2021-01-01 09:31:00" "" "2021-06-30"]))
-  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-02"]))
-  (is-dte-in-range? (+ 31 31 1) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-17"])))
+  (is-line-in-dte-range? (+ 63) (into-array ["" "2021-01-01 09:31:00" "" "2021-01-31"]))
+  (is-line-in-dte-range? (+ 63) (into-array ["" "2021-01-01 09:31:00" "" "2021-06-30"]))
+  (is-line-in-dte-range? (+ 63) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-02"]))
+  (is-line-in-dte-range? (+ 63) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-17"])))
 
 (defn process-zip
   "Assumes that this runs in separate thread."
@@ -106,12 +100,11 @@
   (let [{:keys [lines ^ZipInputStream zip-stream]}
         (zip-object-key->line-seq zip-object-key)
 
-        xf (comp (drop 1)
-                 (map process-line)
-                 (filter (partial is-dte-in-range? (+ 1 31)))
-                 (map convert-tokens-to-buffers)
-                 (partition-all 10000))
-        items (eduction xf lines)]
+        items (->> (drop 1 lines)
+                   (map process-line)
+                   (filter (partial is-line-in-dte-range? (+ 1 31)))
+                   (map convert-tokens-to-buffers)
+                   (partition-all 10000)) ]
     (loop [x (first items)
            items (rest items)]
       (when x
@@ -136,20 +129,35 @@
   (->> (get-object-keys "spx/")
        (filter (partial >=-than-year? 2016))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defn import-option-intervals [{:as args :keys [*num-items]}]
   (let [object-keys (->> (get-object-keys "spx/")
                          (filter (partial >=-than-year? 2016))
-                         (sort)
-                         (take 1))
-        interval-bundle-ch (chan 8)
+                         (filter (fn [x]
+                                   (or (str/includes? x "2021-03.zip")
+                                       (str/includes? x "2021-04.zip")
+                                       (str/includes? x "2021-05.zip")
+                                       (str/includes? x "2021-06.zip"))))
+                         (sort))
+        interval-bundle-ch (chan 4)
+        start-instant (System/currentTimeMillis)
         args (mac/args interval-bundle-ch)]
     (thread
+     (try
       (->> object-keys
-           (map (partial process-zip args))
+           (cp/pmap 4 (partial process-zip args))
            (dorun))
-      (close! interval-bundle-ch))
+      (finally
+       (close! interval-bundle-ch))))
 
     (loop [intervals (<!! interval-bundle-ch)]
+      (let [ms (- (System/currentTimeMillis) start-instant)
+            sec (/ ms 1000.0)
+            n @*num-items
+            rate (/ n sec)]
+        (debugf "num items: %d rate: %d items/sec" n (int rate)))
+
       (when intervals
         (load-interval-data args intervals)
         (swap! *num-items + (count intervals))
@@ -163,7 +171,6 @@
 
 (defn run []
   (let [{:as args :keys [env]} (create-args)]
-    (start-measurement-loop args)
     (with-open [^Env env env]
       (import-option-intervals args))
     :done))
