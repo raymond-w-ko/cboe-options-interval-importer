@@ -1,5 +1,6 @@
 (ns app.core
   (:require
+   [clj-async-profiler.core :as prof]
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
             logf tracef debugf infof warnf errorf fatalf reportf
@@ -26,5 +27,6 @@
 
   (println "BEGIN")
   ; (prices/run)
-  (option-intervals/run)
+  (do
+    (option-intervals/run))
   (println "END"))
