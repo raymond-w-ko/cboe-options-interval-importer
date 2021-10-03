@@ -29,6 +29,7 @@
   org.glassfish.jaxb/jaxb-runtime {:mvn/version "3.0.2"}
   org.glassfish.jaxb/jaxb-core {:mvn/version "3.0.2"}
 
+  com.clojure-goes-fast/clj-async-profiler {:mvn/version "0.5.1"}
   org.apache.commons/commons-collections4 {:mvn/version "4.4"}
   org.apache.commons/commons-lang3 {:mvn/version "3.12.0"}
   joda-time/joda-time {:mvn/version "2.10.12"}
