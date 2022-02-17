@@ -5,6 +5,7 @@ pom.xml.asc
 /.nrepl-port
 /.prepl-port
 /.cpcache
+.cache
 
 # private config
 config.clj
