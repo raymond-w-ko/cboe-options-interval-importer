@@ -9,7 +9,7 @@ run:
 upgrade-deps:
 	clojure -M:outdated --upgrade
 javac:
-	clj -M:javac
+	clj -T:build javac
 
 
 build-worker-image:
