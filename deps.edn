@@ -1,4 +1,4 @@
-{:paths ["classes"
+{:paths ["target/classes"
          "src/clj"]
 
  :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
@@ -6,24 +6,24 @@
 
  :deps
  {org.clojure/clojure {:mvn/version "1.10.3"}
-  org.clojure/core.async {:mvn/version "1.3.622"}
+  org.clojure/core.async {:mvn/version "1.5.648"}
   com.climate/claypoole {:mvn/version "1.1.4"}
-  org.clojure/core.cache {:mvn/version "1.0.217"}
+  org.clojure/core.cache {:mvn/version "1.0.225"}
 
   com.taoensso/timbre {:mvn/version "5.1.2"}
-  org.slf4j/slf4j-simple {:mvn/version "1.7.32"}
+  org.slf4j/slf4j-simple {:mvn/version "1.7.36"}
   tick/tick {:mvn/version "0.4.32"}
 
   org.lmdbjava/lmdbjava  {:mvn/version "0.8.2"}
-  org.agrona/agrona {:mvn/version "1.12.0"}
+  org.agrona/agrona {:mvn/version "1.14.0"}
 
-  org.mariadb.jdbc/mariadb-java-client {:mvn/version "2.7.4"}
+  org.mariadb.jdbc/mariadb-java-client {:mvn/version "3.0.3"}
 
   ; software.amazon.awssdk/s3 {:mvn/version "2.17.46"}
-  com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.77"}
-  com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.77"}
+  com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.160"}
+  com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.160"}
   ;; this requires AWS SDK v1
-  com.github.alexmojaki/s3-stream-upload {:mvn/version "2.2.2"}
+  com.github.alexmojaki/s3-stream-upload {:mvn/version "2.2.4"}
 
   javax.xml.bind/jaxb-api {:mvn/version "2.4.0-b180830.0359"}
   org.glassfish.jaxb/jaxb-runtime {:mvn/version "3.0.2"}
@@ -32,17 +32,21 @@
   com.clojure-goes-fast/clj-async-profiler {:mvn/version "0.5.1"}
   org.apache.commons/commons-collections4 {:mvn/version "4.4"}
   org.apache.commons/commons-lang3 {:mvn/version "3.12.0"}
-  joda-time/joda-time {:mvn/version "2.10.12"}
+  joda-time/joda-time {:mvn/version "2.10.13"}
   virgil/virgil {:mvn/version "0.1.9"}
   badigeon/badigeon {:mvn/version "1.7"}
-  com.clojure-goes-fast/clj-java-decompiler {:mvn/version "0.3.0"}
-  fipp/fipp {:mvn/version "0.6.24"}
+  com.clojure-goes-fast/clj-java-decompiler {:mvn/version "0.3.1"}
+  fipp/fipp {:mvn/version "0.6.25"}
   cljfmt/cljfmt {:mvn/version "0.8.0"}}
 
 
  :aliases
  {:none
   {}
+  
+  :build
+  {:deps {io.github.clojure/tools.build {:git/tag "v0.7.5" :git/sha "34727f7"}}
+   :ns-default build}
 
   :javac
   {:extra-paths ["build"]
@@ -53,8 +57,8 @@
   {:main-opts ["-m" "app.worker"]}
 
   :repl
-  {:extra-deps {nrepl/nrepl {:mvn/version "0.8.3"}
-                cider/cider-nrepl {:mvn/version "0.26.0"}}
+  {:extra-deps {nrepl/nrepl {:mvn/version "0.9.0"}
+                cider/cider-nrepl {:mvn/version "0.28.2"}}
    :main-opts  ["-e" "(require,'app.core)"
                 "-e" "(in-ns,'app.core)"
                 "-m" "nrepl.cmdline"
