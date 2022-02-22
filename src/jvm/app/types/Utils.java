@@ -2,29 +2,35 @@ package app.types;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.commons.lang3.StringUtils;
-import org.joda.time.Instant;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
 
 public final class Utils {
+
   private Utils() {}
 
-  private static LRUMap<String, Instant> timestampMsLookupMap =
-      new LRUMap<String, Instant>(1024 * 1024);
-  private static DateTimeFormatter dateTimeFormatter =
-      DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss");
+  private static LRUMap<String, Instant> timestampMsLookupMap = new LRUMap<String, Instant>(
+    1024 * 1024
+  );
+  private static DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(
+    "yyyy-MM-dd HH:mm:ss"
+  );
+  private static ZoneOffset NewYorkZoneOffset = ZoneOffset.of("America/New_York");
 
-  public static Instant QuoteDateTimeToJodaInstant(String s) {
+  public static Instant QuoteDateTimeToInstant(String s) {
     if (timestampMsLookupMap.containsKey(s)) {
       return timestampMsLookupMap.get(s);
     }
 
-    final var t = Instant.parse(s, dateTimeFormatter);
+    final var ldt = LocalDateTime.parse(s, dateTimeFormatter);
+    final var t = ldt.toInstant(NewYorkZoneOffset);
     timestampMsLookupMap.put(s, t);
     return t;
   }
@@ -48,16 +54,16 @@ public final class Utils {
   }
 
   public static ByteBuffer InstantToByteBuffer(Instant t) {
-    final long ms = t.getMillis() / 1000;
-    final var buf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(ms);
+    final int secs = (int)t.getEpochSecond();
+    final var buf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(secs);
     return buf;
   }
 
   public static Instant ByteBufferToInstant(DirectBuffer srcBuf, int i) {
-    final var dstBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN);
-    srcBuf.getBytes(i, dstBuf, 4, 4);
-    final long ms = dstBuf.getLong(0) * 1000;
-    return new Instant(ms);
+    final var dstBuf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+    srcBuf.getBytes(i, dstBuf, 0, 4);
+    final int secs = dstBuf.getInt(0);
+    return Instant.ofEpochSecond((long)secs);
   }
 
   private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
@@ -88,7 +94,7 @@ public final class Utils {
 
     // final var f = Float.parseFloat(s) * 100;
     // return (int)Math.floor(f);
-    
+
     return Float.parseFloat(s);
   }
 }
