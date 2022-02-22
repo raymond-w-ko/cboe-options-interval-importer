@@ -6,9 +6,10 @@ pom.xml.asc
 /.prepl-port
 /.cpcache
 .cache
+.rebel_readline_history
 
 # private config
-config.clj
+/src/clj/app/config.clj
 
 # non-public output
 /prices.edn
