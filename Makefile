@@ -2,14 +2,17 @@ IMAGE := 237991343424.dkr.ecr.us-east-1.amazonaws.com/cboe:latest
 JVM_ARGS := -J-Djdk.attach.allowAttachSelf
 CLJ_EXTRA_SAFETY_ARGS := -J-Dclojure.core.async.go-checking=true
 
-repl:
-	clojure $(JVM_ARGS) $(CLJ_EXTRA_SAFETY_ARGS) -M:repl
+repl: rebel-repl
+classic-repl:
+	exec clojure $(JVM_ARGS) $(CLJ_EXTRA_SAFETY_ARGS) -M:repl
+rebel-repl:
+	exec clojure $(JVM_ARGS) $(CLJ_EXTRA_SAFETY_ARGS) -M:repl/rebel
 run:
-	clojure $(JVM_ARGS) -J-Xmx16G -M:none -m app.core
+	exec clojure $(JVM_ARGS) -J-Xmx16G -M:none -m app.core
 upgrade-deps:
-	clojure -M:outdated --upgrade
+	exec clojure -M:outdated --upgrade
 javac:
-	clj -T:build javac
+	exec clojure -T:build javac
 
 
 build-worker-image:
