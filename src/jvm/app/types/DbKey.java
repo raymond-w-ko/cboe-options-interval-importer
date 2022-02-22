@@ -4,30 +4,25 @@ import static app.types.Utils.ByteBufferToInstant;
 import static app.types.Utils.ExpDateToInt;
 import static app.types.Utils.InstantToByteBuffer;
 import static app.types.Utils.IntToExpDate;
-import static app.types.Utils.QuoteDateTimeToJodaInstant;
+import static app.types.Utils.QuoteDateTimeToInstant;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.time.Instant;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.apache.commons.collections4.map.LRUMap;
 import org.apache.commons.lang3.StringUtils;
-import org.joda.time.Instant;
-import org.joda.time.format.DateTimeFormat;
-import org.joda.time.format.DateTimeFormatter;
 
 public final class DbKey {
 
   /// use joda time for instant
-  public org.joda.time.Instant quoteDateTime;
-  /// must be a string of a length of 5
-  public String root;
-  /// P or C
-  public char optionType;
+  public java.time.Instant quoteDateTime;
   /// "YYYY-MM-DD"
   public String expirationDate;
-  public int strike;
+  /// as of year 2022, SPX all time high is around 4800
+  public short strike;
 
   public DbKey() {}
 
@@ -36,20 +31,9 @@ public final class DbKey {
     // [0] is always "^SPX"
 
     // [1] is quote_datetime
-    k.quoteDateTime = QuoteDateTimeToJodaInstant(tokens[1]);
+    k.quoteDateTime = QuoteDateTimeToInstant(tokens[1]);
 
-    // [2] is root
-    {
-      var root = tokens[2];
-      final var n = root.length();
-      if (n < 5) {
-        var numSpaces = 5 - n;
-        for (int i = 0; i < numSpaces; ++i) {
-          root = root + " ";
-        }
-      }
-      k.root = root;
-    }
+    // [2] is root, which is max 5 characters
 
     // [3] is expiration date
     k.expirationDate = tokens[3];
@@ -64,12 +48,8 @@ public final class DbKey {
       } else {
         throw new RuntimeException("strike suffix must be '.000', got input: " + strike);
       }
-      k.strike = Integer.parseInt(strike);
+      k.strike = Short.parseShort(strike);
     }
-
-    // [5] is optionType
-    char optionType = tokens[5].charAt(0);
-    k.optionType = optionType;
 
     return k;
   }
@@ -79,16 +59,12 @@ public final class DbKey {
     final var buf = new UnsafeBuffer(bb);
     var i = 0;
 
-    buf.putBytes(i, InstantToByteBuffer(quoteDateTime), 4, 4);
+    buf.putBytes(i, InstantToByteBuffer(quoteDateTime), 4);
     i += 4;
-    buf.putStringWithoutLengthUtf8(i, root);
-    i += 5;
-    buf.putByte(i, (byte) optionType);
-    i += 1;
     buf.putInt(i, ExpDateToInt(expirationDate), ByteOrder.BIG_ENDIAN);
     i += 4;
-    buf.putInt(i, strike, ByteOrder.BIG_ENDIAN);
-    i += 4;
+    buf.putShort(i, strike, ByteOrder.BIG_ENDIAN);
+    i += 2;
 
     return buf;
   }
@@ -99,14 +75,10 @@ public final class DbKey {
 
     k.quoteDateTime = ByteBufferToInstant(buf, i);
     i += 4;
-    k.root = buf.getStringWithoutLengthUtf8(i, 5);
-    i += 5;
-    k.optionType = (char) buf.getByte(i);
-    i += 1;
     k.expirationDate = IntToExpDate(buf.getInt(i, ByteOrder.BIG_ENDIAN));
     i += 4;
-    k.strike = buf.getInt(i, ByteOrder.BIG_ENDIAN);
-    i += 4;
+    k.strike = buf.getShort(i, ByteOrder.BIG_ENDIAN);
+    i += 2;
 
     return k;
   }
