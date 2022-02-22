@@ -27,6 +27,4 @@
 
   (println "BEGIN")
   ; (prices/run)
-  (do
-    (option-intervals/run))
   (println "END"))
