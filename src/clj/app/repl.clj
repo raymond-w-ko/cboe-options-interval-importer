@@ -4,8 +4,6 @@
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
    
-   [org.joda.time Instant]
-   
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp DbiFlags PutFlags KeyRange]
    [org.agrona MutableDirectBuffer]
