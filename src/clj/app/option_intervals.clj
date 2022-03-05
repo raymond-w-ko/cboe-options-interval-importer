@@ -1,42 +1,33 @@
 (ns app.option-intervals
   (:import
    [java.lang String]
-   [java.util UUID]
-   [java.util.zip ZipInputStream]
-   [java.nio.charset Charset]
-   [java.io LineNumberReader InputStreamReader BufferedReader FileWriter]
-   [java.sql DriverManager Connection Statement PreparedStatement ResultSet]
 
+   [java.io File LineNumberReader InputStreamReader BufferedReader]
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp Dbi DbiFlags PutFlags]
-   [org.joda.time Instant Period Days Duration]
-   [org.joda.time.format DateTimeFormat DateTimeFormatter]
+   [java.time Instant LocalDateTime ZonedDateTime ZoneId]
+   [java.time.format DateTimeFormatter]
+   [java.time.temporal ChronoUnit]
 
    [app.types DbKey DbValue])
   (:require
    [fipp.edn :refer [pprint] :rename {pprint fipp}]
+   [com.climate.claypoole :as cp]
    [clojure.java.io :as io]
-   [clojure.string :as str]
-   [clojure.core.cache :as c]
    [clojure.core.cache.wrapped :as cw]
 
    [clojure.core.async
     :as async
     :refer [go go-loop >! >!! <! <!! chan put! thread timeout close! to-chan
             pipeline pipeline-blocking]]
+
+   [app.macros :as mac :refer [->hash field cond-let cond-xlet]]
+   [app.utils :refer [get-zips zip-file->buffered-reader intern-date take-batch array-type]]
+   [app.lmdb :as lmdb]
+
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
-            logf tracef debugf infof warnf errorf fatalf reportf
-            spy get-env]]
-
-   [com.climate.claypoole :as cp]
-   [tick.alpha.api :as t]
-
-   [app.macros :as mac :refer [->hash field cond-let]]
-   [app.utils :refer [get-zips zip->buffered-reader intern-date take-batch array-type]]
-   [app.s3 :refer [get-object-keys
-                   zip-object-key->line-seq]]
-   [app.lmdb :as lmdb]))
+            logf tracef debugf infof warnf errorf fatalf reportf]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -54,102 +45,113 @@
         db-value (DbValue/fromCsvLineTokens tokens)]
     [(.toBuffer db-key) (.toBuffer db-value)]))
 
-(def quote-datetime-formatter (DateTimeFormat/forPattern "yyyy-MM-dd HH:mm:ss"))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def new-york-zone-id (ZoneId/of "America/New_York"))
+
+(defn str->instant [formatter s]
+  (-> (LocalDateTime/parse s formatter)
+      (ZonedDateTime/of new-york-zone-id)
+      (.toInstant)))
+
+; (def exp-date-formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd"))
+(def quote-datetime-formatter (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss"))
 (def ->quote-datetime-instant
-  (let [C (cw/lru-cache-factory {} :threshold (* 1024 1024))
-        f (fn [s] (Instant/parse s quote-datetime-formatter))]
+  (let [C (cw/lru-cache-factory {} :threshold (* 1 1024))
+        f (fn [s] (str->instant quote-datetime-formatter s))]
     (fn [s]
       (cw/lookup-or-miss C s f))))
 
-(def exp-date-formatter (DateTimeFormat/forPattern "yyyy-MM-dd"))
 (def ->expiration-date-instant
-  (let [C (cw/lru-cache-factory {} :threshold (* 1024 1024))
+  (let [C (cw/lru-cache-factory {} :threshold (* 1 1024))
         f (fn [s]
-            (-> (Instant/parse s exp-date-formatter)
-                ;; 4PM EST is when options expire
-                (.plus (new Duration (* (+ 12 4) 60 60 1000)))))]
+            ;; 4PM EST is when options expire
+            (str->instant quote-datetime-formatter (str s " 16:00:00")))]
     (fn [s]
       (cw/lookup-or-miss C s f))))
 
 (def is-dte-in-range?
-  (let [C (cw/lru-cache-factory {} :threshold (* 1024 1024))
+  (let [C (cw/lru-cache-factory {} :threshold (* 1 1024))
         f (fn [[max-dte now dte]]
             (let [^Instant now (->quote-datetime-instant now)
                   ^Instant dte (->expiration-date-instant dte)
-                  days (-> (Days/daysBetween now dte)
-                           .getDays)]
+                  days (.between ChronoUnit/DAYS now dte)]
               (< days max-dte)))]
-    (fn [max-dte now exp-dte]
-      (cw/lookup-or-miss C [max-dte now exp-dte] f))))
+    (fn [args]
+      (cw/lookup-or-miss C args f))))
 
 (defn is-line-in-dte-range? [max-dte ^"[Ljava.lang.String;" tokens]
   (let [now (field tokens "quote_datetime")
         dte (field tokens "expiration")]
-    (is-dte-in-range? max-dte now dte)))
-   
+    (is-dte-in-range? [max-dte now dte])))
+
 (comment
+  (->quote-datetime-instant "2022-03-13 01:00:00")
+  (->quote-datetime-instant "2022-03-13 02:00:00")
+  (->quote-datetime-instant "2022-03-13 03:00:00")
+  
+  (->quote-datetime-instant "2022-11-06 00:00:00")
+  (->quote-datetime-instant "2022-11-06 01:00:00")
+  (->quote-datetime-instant "2022-11-06 02:00:00")
+  
+  
+  (->expiration-date-instant "2021-01-31")
   (is-line-in-dte-range? (+ 63) (into-array ["" "2021-01-01 09:31:00" "" "2021-01-31"]))
   (is-line-in-dte-range? (+ 63) (into-array ["" "2021-01-01 09:31:00" "" "2021-06-30"]))
   (is-line-in-dte-range? (+ 63) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-02"]))
   (is-line-in-dte-range? (+ 63) (into-array ["" "2020-01-02 09:31:00" "" "2020-01-17"])))
 
-(defn process-zip
-  "Assumes that this runs in separate thread."
-  [{:keys [interval-bundle-ch]} zip-object-key]
-  (info "processing zip-object-key" zip-object-key)
-  (let [{:keys [lines ^ZipInputStream zip-stream]}
-        (zip-object-key->line-seq zip-object-key)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-        items (->> (drop 1 lines)
-                   (map process-line)
-                   (filter (partial is-line-in-dte-range? (+ 1 31)))
-                   (map convert-tokens-to-buffers)
-                   (partition-all 10000)) ]
-    (loop [x (first items)
-           items (rest items)]
-      (when x
-        (>!! interval-bundle-ch x)
-        (recur (first items) (rest items))))
-    (.close zip-stream)))
+(defn process-zip-file
+  "Assumes that this runs in separate thread."
+  [{:keys [interval-bundle-ch]} zip-file]
+  (info "processing zip-file" zip-file)
+  (let [{:keys [^BufferedReader reader
+                fname]}
+        (zip-file->buffered-reader zip-file)
+        lines (line-seq reader)
+        roots (transient #{})
+
+        xf (comp (drop 1)
+                 (map process-line)
+                 (map #(conj! roots (field % "root")))
+                 ; (filter (partial is-line-in-dte-range? (+ 1 7)))
+                 ; (map convert-tokens-to-buffers)
+                 (partition-all 100000))]
+    (transduce xf
+               (fn
+                 ([] nil)
+                 ([_] nil)
+                 ([_ bundle] (>!! interval-bundle-ch bundle)))
+               lines)
+    (spit (format "out/%s.edn" fname) (pr-str (persistent! roots)))
+    (.close reader)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn load-interval-data [{:keys [env db]} intervals]
-  (lmdb/put-buffers env db intervals))
-
-(defn >=-than-year? [year path]
-  (let [a (str/last-index-of path "/")
-        path (subs path (inc a))
-        b (str/index-of path "-")
-        path (subs path 0 b)
-        c (str/last-index-of path "_")
-        token (subs path (inc c))]
-    (>= (Integer/parseInt token) year)))
-(comment
-  (->> (get-object-keys "spx/")
-       (filter (partial >=-than-year? 2016))))
+  ; (lmdb/put-buffers env db intervals)
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn import-option-intervals [{:as args :keys [*num-items]}]
-  (let [object-keys (->> (get-object-keys "spx/")
-                         (filter (partial >=-than-year? 2016))
-                         (filter (fn [x]
-                                   (or (str/includes? x "2021-03.zip")
-                                       (str/includes? x "2021-04.zip")
-                                       (str/includes? x "2021-05.zip")
-                                       (str/includes? x "2021-06.zip"))))
-                         (sort))
+(defn import-option-intervals!
+  [{:as args :keys [src-dir zip-files-xf *num-items]}]
+  (let [zip-files (->> (get-zips src-dir)
+                       (into [] zip-files-xf))
         interval-bundle-ch (chan 4)
         start-instant (System/currentTimeMillis)
         args (mac/args interval-bundle-ch)]
+    (dorun (map (fn [^File file] (.exists file)) zip-files))
+    
     (thread
-     (try
-      (->> object-keys
-           (cp/pmap 4 (partial process-zip args))
-           (dorun))
-      (finally
-       (close! interval-bundle-ch))))
+      (try
+        (->> zip-files
+             (cp/pmap 4 (partial process-zip-file args))
+             (dorun))
+        (finally
+          (close! interval-bundle-ch))))
 
     (loop [intervals (<!! interval-bundle-ch)]
       (let [ms (- (System/currentTimeMillis) start-instant)
@@ -159,18 +161,20 @@
         (debugf "num items: %d rate: %d items/sec" n (int rate)))
 
       (when intervals
-        (load-interval-data args intervals)
+        ; (load-interval-data args intervals)
         (swap! *num-items + (count intervals))
-        (recur (<!! interval-bundle-ch))))))
+        (recur (<!! interval-bundle-ch))))
 
-(defn create-args []
-  (let [*num-items (atom 0)
-        env (lmdb/create-write-env "./dbs/spx")
-        db (lmdb/open-db env)]
-    (->hash *num-items env db)))
+    nil))
 
-(defn run []
-  (let [{:as args :keys [env]} (create-args)]
-    (with-open [^Env env env]
-      (import-option-intervals args))
-    :done))
+(defn create-base-args []
+  (let [*num-items (atom 0)]
+    (->hash *num-items)))
+
+(defn import! [{:as args :keys [lmdb-env-dir]}]
+  (assert (.exists (io/file lmdb-env-dir)))
+  (with-open [env (lmdb/create-write-env lmdb-env-dir)]
+    (cond-xlet
+     :let [args (mac/args env)]
+     :return (import-option-intervals! args)))
+  (debug "import! finished"))

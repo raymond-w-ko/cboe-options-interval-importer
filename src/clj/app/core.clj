@@ -1,15 +1,12 @@
 (ns app.core
   (:require
    [clj-async-profiler.core :as prof]
+   [app.option-intervals :as oi]
+   [app.config :as config]
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
-            logf tracef debugf infof warnf errorf fatalf reportf
-            spy get-env]]
-   [tick.alpha.api :as t]
-
-   ; [app.options :as options]
-   ; [app.prices :as prices]
-   [app.option-intervals :as option-intervals]))
+            logf tracef debugf infof warnf errorf fatalf reportf]]
+   [clojure.string :as str]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -17,14 +14,31 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn internal-consistency-check! []
-  (assert (= (t/date "1970-01-01") (t/date "1970-01-01")))
-  (assert (not= (t/date "1970-01-01") (t/date "1970-01-02"))))
+(defn >=-than-year? [year file]
+  (let [path (.getPath file)
+        a (str/last-index-of path "/")
+        path (subs path (inc a))
+        b (str/index-of path "-")
+        path (subs path 0 b)
+        c (str/last-index-of path "_")
+        token (subs path (inc c))]
+    (>= (Integer/parseInt token) year)))
+
+(defn import-puts []
+  (let [zip-files-xf (comp (filter (partial >=-than-year? 2016))
+                           (take 1))
+        args (merge
+              (oi/create-base-args)
+              {:src-dir config/spx-zip-dir
+               :lmdb-env-dir config/spx-puts-lmdb-dir
+               :zip-files-xf zip-files-xf})]
+    (oi/import! args)))
+
+(defn profiled-run []
+  (prof/profile (import-puts)))
 
 (defn -main []
   (println (/ (-> (Runtime/getRuntime) .maxMemory) 1024 1024) "G")
-  (internal-consistency-check!)
 
   (println "BEGIN")
-  ; (prices/run)
   (println "END"))
