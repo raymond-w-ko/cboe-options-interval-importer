@@ -55,11 +55,11 @@ public final class DbKey {
   }
 
   public UnsafeBuffer toBuffer() {
-    final var bb = ByteBuffer.allocateDirect(4 + 5 + 1 + 4 + 4);
+    final var bb = ByteBuffer.allocateDirect(4 + 4 + 2);
     final var buf = new UnsafeBuffer(bb);
     var i = 0;
 
-    buf.putBytes(i, InstantToByteBuffer(quoteDateTime), 4);
+    buf.putBytes(i, InstantToByteBuffer(quoteDateTime), 0, 4);
     i += 4;
     buf.putInt(i, ExpDateToInt(expirationDate), ByteOrder.BIG_ENDIAN);
     i += 4;
