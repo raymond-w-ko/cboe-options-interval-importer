@@ -4,7 +4,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
@@ -16,22 +17,23 @@ public final class Utils {
 
   private Utils() {}
 
-  private static LRUMap<String, Instant> timestampMsLookupMap = new LRUMap<String, Instant>(
+  private static LRUMap<String, Instant> instantLookupMap = new LRUMap<String, Instant>(
     1024 * 1024
   );
   private static DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(
     "yyyy-MM-dd HH:mm:ss"
   );
-  private static ZoneOffset NewYorkZoneOffset = ZoneOffset.of("America/New_York");
+  private static ZoneId NewYorkZoneId = ZoneId.of("America/New_York");
 
   public static Instant QuoteDateTimeToInstant(String s) {
-    if (timestampMsLookupMap.containsKey(s)) {
-      return timestampMsLookupMap.get(s);
+    if (instantLookupMap.containsKey(s)) {
+      return instantLookupMap.get(s);
     }
 
     final var ldt = LocalDateTime.parse(s, dateTimeFormatter);
-    final var t = ldt.toInstant(NewYorkZoneOffset);
-    timestampMsLookupMap.put(s, t);
+    final var zdt = ZonedDateTime.of(ldt, NewYorkZoneId);
+    final var t = zdt.toInstant();
+    instantLookupMap.put(s, t);
     return t;
   }
 
