@@ -12,19 +12,18 @@
    [clojure.java.io :as io]
 
    [tick.alpha.api :as t]
-   
-   [app.config :refer [zip-dir]]
+
    [app.macros :refer [cond-let]]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn iter-seq
-  ([iterable] 
-    (iter-seq iterable (.iterator iterable)))
-  ([iterable i] 
-    (lazy-seq 
-      (when (.hasNext i)
-        (cons (.next i) (iter-seq iterable i))))))
+  ([iterable]
+   (iter-seq iterable (.iterator iterable)))
+  ([iterable i]
+   (lazy-seq
+    (when (.hasNext i)
+      (cons (.next i) (iter-seq iterable i))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -36,9 +35,9 @@
   ([klass] (array-type klass 1))
   ([klass dims]
    (.getName (class
-	      (apply make-array
-		     (if (symbol? klass) (eval klass) klass)
-		     (repeat dims 0))))))
+              (apply make-array
+                     (if (symbol? klass) (eval klass) klass)
+                     (repeat dims 0))))))
 
 (defn ->core-filename [s]
   (-> (re-matches #".*(\d\d\d\d-\d\d)([.]).*" s)
@@ -51,21 +50,20 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn get-zips []
+(defn get-zips [zip-dir]
   (->> (io/file zip-dir)
        (file-seq)
        (filter #(str/ends-with? (str %) ".zip"))
        (sort-by str)))
 
-(defn zip->buffered-reader [zip-file]
+(defn zip-file->buffered-reader [zip-file]
   (let [is (io/input-stream zip-file)
         zip-stream (ZipInputStream. is)
-	;; assume one and only one entry
+	      ;; assume one and only one entry
         entry (.getNextEntry zip-stream)
         fname (.getName entry)
         reader (-> (InputStreamReader. zip-stream)
-                   (BufferedReader. (* 1024 1024 32)))]
-    (.readLine reader) ;; skip first row since it is a header
+                   (BufferedReader. (* 1024 1024 64)))]
     {:reader reader
      :fname fname}))
 
@@ -73,13 +71,13 @@
 
 (def intern-date
   (let [C (cw/basic-cache-factory {})
-	->date (fn [date-string] (t/date date-string))]
+        ->date (fn [date-string] (t/date date-string))]
     (fn [date-string]
       (cw/lookup-or-miss C date-string ->date))))
 
 (def intern-date-time
   (let [C (cw/basic-cache-factory {})
-	->dt (fn [dt-string] (t/date-time dt-string))]
+        ->dt (fn [dt-string] (t/date-time dt-string))]
     (fn [dt-string]
       (cw/lookup-or-miss C dt-string ->dt))))
 
@@ -87,17 +85,16 @@
 
 (defn take-batch [n t ch]
   (let [out (chan)
-	coll (transient [])]
+        coll (transient [])]
     (go-loop [i 0]
       (cond-let
        (= i n) (do (put! out (persistent! coll))
-		   (close! out))
-       
-       
+                   (close! out))
+
        :let [[v _] (alts! [ch (timeout t)])]
        (nil? v) (do (put! out (persistent! coll))
-		    (close! out))
+                    (close! out))
 
        :return (do (conj! coll v)
-		   (recur (inc i)))))
+                   (recur (inc i)))))
     out))
