@@ -28,16 +28,12 @@ public final class DbKey {
 
   public static DbKey fromCsvLineTokens(String[] tokens) {
     DbKey k = new DbKey();
-    // [0] is always "^SPX"
-
+    // [0] is the underlying such as "^SPX", this depends on the directory of the Env
     // [1] is quote_datetime
     k.quoteDateTime = QuoteDateTimeToInstant(tokens[1]);
-
-    // [2] is root, which is max 5 characters
-
+    // [2] is root, which is max 5 characters, this depends on the directory of the Env or the name of the DB
     // [3] is expiration date
     k.expirationDate = tokens[3];
-
     // [4] is strike
     {
       var strike = tokens[4];
@@ -50,6 +46,7 @@ public final class DbKey {
       }
       k.strike = Short.parseShort(strike);
     }
+    // [5] is the option type (P, C) which depends on the directory of the Env
 
     return k;
   }
