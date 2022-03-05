@@ -1,0 +1,7 @@
+{:linters
+ {:unused-referred-var {:level :off}
+  :unused-namespace {:exclude [taoensso.timbre]}
+  :unresolved-var {:exclude [honeysql.helpers]}}
+ :lint-as {}
+ :hooks {:analyze-call {app.macros/cond-let hooks.cond-xlet/cond-xlet
+                        app.macros/cond-xlet hooks.cond-xlet/cond-xlet}}}
