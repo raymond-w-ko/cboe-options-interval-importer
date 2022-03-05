@@ -6,6 +6,7 @@ import org.agrona.DirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
 class Buffer {
+
   /// used internally to keep track of buffer write offsets
   protected int i;
 
@@ -22,7 +23,7 @@ class Buffer {
     buf.putFloat(this.i, x, ByteOrder.BIG_ENDIAN);
     this.i += 4;
   }
-  
+
   protected int getInt(DirectBuffer buf) {
     final var x = buf.getInt(this.i, ByteOrder.BIG_ENDIAN);
     this.i += 4;
@@ -34,5 +35,4 @@ class Buffer {
     this.i += 4;
     return x;
   }
-
 }
