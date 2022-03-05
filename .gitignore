@@ -19,5 +19,5 @@ pom.xml.asc
 /lmdb-verifier
 /*.hex
 
-# dbs
-/dbs/*
+# misc output
+/out/
