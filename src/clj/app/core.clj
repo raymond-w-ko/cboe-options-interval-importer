@@ -1,4 +1,6 @@
 (ns app.core
+  (:import
+   [java.io File])
   (:require
    [clj-async-profiler.core :as prof]
    [app.option-intervals :as oi]
@@ -14,7 +16,7 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn >=-than-year? [year file]
+(defn >=-than-year? [year ^File file]
   (let [path (.getPath file)
         a (str/last-index-of path "/")
         path (subs path (inc a))
