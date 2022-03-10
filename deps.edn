@@ -16,18 +16,25 @@
 
   org.lmdbjava/lmdbjava  {:mvn/version "0.8.2"}
   org.agrona/agrona {:mvn/version "1.14.0"}
+  com.taoensso/nippy {:mvn/version "3.1.1"}
 
   ; org.mariadb.jdbc/mariadb-java-client {:mvn/version "3.0.3"}
 
   ; software.amazon.awssdk/s3 {:mvn/version "2.17.46"}
-  com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.172"}
-  com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.172"}
+  com.amazonaws/aws-java-sdk-s3 {:mvn/version "1.12.173"}
+  com.amazonaws/aws-java-sdk-batch {:mvn/version "1.12.173"}
   ;; this requires AWS SDK v1
   com.github.alexmojaki/s3-stream-upload {:mvn/version "2.2.4"}
 
   javax.xml.bind/jaxb-api {:mvn/version "2.4.0-b180830.0359"}
   org.glassfish.jaxb/jaxb-runtime {:mvn/version "3.0.2"}
   org.glassfish.jaxb/jaxb-core {:mvn/version "3.0.2"}
+
+  org.apache.orc/orc-core {:mvn/version "1.7.3"}
+  org.apache.hadoop/hadoop-common {:mvn/version "3.3.2"}
+  org.apache.hadoop/hadoop-hdfs {:mvn/version "3.3.2"}
+  org.apache.parquet/parquet-avro {:mvn/version "1.12.2"}
+  org.apache.parquet/parquet-hadoop {:mvn/version "1.12.2"}
 
   com.clojure-goes-fast/clj-async-profiler {:mvn/version "0.5.1"}
   org.apache.commons/commons-collections4 {:mvn/version "4.4"}
@@ -62,13 +69,14 @@
   {:extra-deps {nrepl/nrepl                {:mvn/version "0.9.0"}
                 cider/cider-nrepl          {:mvn/version "0.28.3"}
                 com.bhauman/rebel-readline {:mvn/version "0.1.4"}}
-   :jvm-opts ["-Xmx16G"
-              "-XX:+UseZGC"
+   :jvm-opts ["-Xmx30G"
+              ; "-XX:+UseZGC"
+              ; "-XX:+UseParallelGC"
+              "-XX:+UseG1GC" "-XX:+UseStringDeduplication"
               "-Djdk.attach.allowAttachSelf"
               "-XX:+UnlockDiagnosticVMOptions"
               "-XX:+DebugNonSafepoints"]
-   :main-opts  ["-e" "(require,'app.core)"
-                "-e" "(in-ns,'app.core)"
+   :main-opts  ["-e" "(require,'app.core),(in-ns,'app.core)"
                 "-m" "nrepl.cmdline"
                 "--middleware" "[cider.nrepl/cider-middleware]"
                 "-i"
