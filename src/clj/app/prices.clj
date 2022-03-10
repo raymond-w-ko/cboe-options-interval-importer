@@ -1,120 +1,144 @@
 (ns app.prices
   (:import
-   [java.io LineNumberReader InputStreamReader BufferedReader]
-   [java.sql DriverManager Connection Statement PreparedStatement ResultSet])
+   [java.io File]
+   [java.sql DriverManager Connection Statement PreparedStatement ResultSet]
+   [java.nio ByteBuffer]
+
+   [org.agrona.concurrent UnsafeBuffer]
+   [org.lmdbjava Dbi CursorIterable$KeyVal]
+
+   [org.apache.avro Schema$Parser]
+   [org.apache.avro.generic GenericData$Record]
+   [org.apache.hadoop.conf Configuration]
+   [org.apache.parquet.avro AvroParquetWriter AvroParquetWriter]
+   [org.apache.parquet.hadoop ParquetFileWriter$Mode]
+   [org.apache.parquet.hadoop.metadata CompressionCodecName]
+
+   [org.apache.hadoop.fs Path]
+
+   [app.types Utils])
   (:require
    [clojure.pprint :refer [pprint]]
-   [clojure.java.io :as io :refer []]
+   [clojure.java.io :as io]
    [clojure.string :as str]
-   [clojure.core.cache :as c]
-   [clojure.core.cache.wrapped :as cw]
-   [clojure.core.async :refer [go go-loop >! >!! <! <!! chan put! thread timeout]]
-   [clojure.core.async.impl.protocols :refer [WritePort]]
+   [clojure.edn :as edn]
+
    [taoensso.timbre :as timbre
     :refer [log  trace  debug  info  warn  error  fatal  report
             logf tracef debugf infof warnf errorf fatalf reportf
             spy get-env]]
+   [taoensso.nippy :as nippy]
 
    [com.climate.claypoole :as cp]
 
-   [app.macros :refer [->hash field cond-let]]
-   [app.utils :refer [get-zips zip->buffered-reader intern-date-time take-batch]]
-   [app.db :refer [create-db-connection]]))
+   [app.macros :as mac :refer [->hash field cond-xlet]]
+   [app.utils :refer []]
+   [app.lmdb :as lmdb]))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set! *warn-on-reflection* true)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn ^ByteBuffer clone-to-memaligned-buffer [^bytes src]
+  (let [buf (ByteBuffer/allocateDirect (alength src))]
+    (.put buf src)
+    buf))
+
+(defn unthaw-unsafe-buffer [^UnsafeBuffer src]
+  (let [buf (make-array Byte/TYPE (.capacity src))]
+    (.getBytes src 0 buf)
+    (nippy/thaw buf)))
+
+(defn process-edn-file! [{:keys [env db]} ^File edn-file]
+  (debug (-> edn-file .getPath))
+  (let [xs (-> edn-file
+               .getPath
+               slurp
+               edn/read-string)
+        ->kv-buffers
+        (fn [{:keys [quote-datetime bid ask price]}]
+          (assert quote-datetime)
+          (assert bid)
+          (assert ask)
+          (assert price)
+          (let [t (Utils/QuoteDateTimeToInstant quote-datetime)
+                m {:bid (Float/parseFloat bid)
+                   :ask (Float/parseFloat ask)
+                   :price (Float/parseFloat price)}
+                k (->> (Utils/InstantToByteBuffer t)
+                       (new UnsafeBuffer))
+                v (->> (nippy/freeze m)
+                       (clone-to-memaligned-buffer)
+                       (new UnsafeBuffer))]
+            [k v]))]
+    (->> (mapv ->kv-buffers xs)
+         (lmdb/put-buffers env db true)
+         (dorun))))
+
+(defn import!
+  [{:as args :keys [edn-src-dir lmdb-env-dir db-name]}]
+  (assert (.exists (io/file lmdb-env-dir)))
+  (with-open [env (lmdb/create-write-env lmdb-env-dir)]
+    (with-open [db (lmdb/open-db env db-name)]
+      (cond-xlet
+       :let [args (mac/args env db)]
+       :do (->> (io/file edn-src-dir)
+                (file-seq)
+                (filter (fn [^File f] (.isFile f)))
+                (sort)
+                (cp/pmap 4 (partial process-edn-file! args))
+                (dorun))))
+    (.sync env true))
+  (debug "import! finished"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn process-line! [i line m]
-  (let [arr (.split line ",")
+(defn print-kv [^CursorIterable$KeyVal x]
+  (let [key-buf (.key x)
+        val-buf (.val x)]
+    (debug (Utils/ByteBufferToInstant key-buf 0))
+    (debug (-> val-buf unthaw-unsafe-buffer))))
 
-        underlying_symbol (field arr "underlying_symbol")
-        quote_datetime (-> (field arr "quote_datetime")
-                           (str/replace " " "T"))
-        bid (field arr "underlying_bid")
-        ask (field arr "underlying_ask")
-        active_price (field arr "active_underlying_price")
-        k [underlying_symbol quote_datetime]
-        v [bid ask active_price]]
-    (if (contains? m k)
-      (when (not= v (get m k))
-        (error "mismatch bid/ask/active_price" k v)
-        (assert false)))
-    (assoc! m k v)))
+(defn walk+print [{:keys [txn ^Dbi db]}]
+  (cond-xlet
+   :let [c (.iterate db txn)
+         iter (.iterator c)
+         x (.next iter)]
+   :do (print-kv x)
+   :let [x (->> (repeatedly 1700000 #(.next iter))
+                (last))]
+   :do (print-kv x)))
 
-(defn process-zip! [zip-file]
-  (let [{:keys [^BufferedReader reader fname]} (zip->buffered-reader zip-file)]
-    (loop [i 0
-           line (.readLine reader)
-           m (transient {})]
-      (if-not line
-        (info fname i)
-        (when (= 0 (mod i 1000000)) (info fname i)))
-
-      (if line
-        (let [m (process-line! i line m)]
-          (recur (inc i) (.readLine reader) m))
-        (let [ret (persistent! m)]
-          (info "zip prices map size" (count ret))
-          ret)))))
+(defn read+print-some-prices [{:as args :keys [lmdb-env-dir db-name]}]
+  (with-open [env (lmdb/create-read-env lmdb-env-dir)]
+    (with-open [db (lmdb/open-db env db-name)]
+      (with-open [txn (.txnRead env)]
+        (cond-xlet
+         :let [args (mac/args env db txn)]
+         :do (walk+print args))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn merge-maps [m a]
-  (assert (map? m))
-  (assert (map? a))
-  (dorun
-   (for [[k v] a]
-     (when (contains? m k)
-       (assert (= v (get m k))))))
-  (merge m a))
+(def prices-schema (-> (new Schema$Parser)
+                       (.parse (slurp "prices.avsc"))))
 
-(defn sort-series [m]
-  (let [coll (for [[[sym dt] [bid ask price]] m]
-               [sym (intern-date-time dt) bid ask price])
-        sf (fn [[_ t]] [_ t])]
-    (sort-by sf coll)))
+(defn write-parquet!
+  [{:as args :keys [lmdb-env-dir
+                    db-name
+                    ^String output-path]}]
+  (with-open [env (lmdb/create-read-env lmdb-env-dir)]
+    (with-open [db (lmdb/open-db env db-name)]
+      (let [args (mac/args env db)
+            configuration (new Configuration)]
+        (with-open [writer (-> (AvroParquetWriter/builder (new Path output-path))
+                               (.withSchema prices-schema)
+                               (.withConf configuration)
+                               (.withCompressionCodec CompressionCodecName/SNAPPY)
+                               (.withWriteMode ParquetFileWriter$Mode/OVERWRITE)
+                               (.build))]
+          (let [record (new GenericData$Record prices-schema)]
+            (.put record "t" (new Long 0))
+            (.put record "price" (new Float 420.69))
+            (.write writer record)))
 
-(defn print-series [coll]
-  (dorun
-   (for [x coll]
-     (println x))))
-
-(defn insert-into-db [{:keys [db insert-prices-pstmt]} coll]
-  (let [{:keys [conn]} db
-        pstmt ^PreparedStatement insert-prices-pstmt
-        add-batch!
-        (fn [batch]
-          (dorun
-           (for [[sym dt bid ask active_price] batch]
-             (doto pstmt
-               (.setString 1 sym)
-               (.setString 2 (.toString dt))
-               (.setString 3 bid)
-               (.setString 4 ask)
-               (.setString 5 active_price)
-               (.addBatch))))
-          (.executeBatch pstmt))]
-    (->> (partition 1000 coll)
-         (map add-batch!)
-         (dorun))
-    (.close conn)))
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def insert-sql
-  (str "insert into `prices` ("
-       "symbol, quote_datetime, bid, ask, active_price"
-       ") "
-       "values(?, ?, ?, ?, ?)"))
-(defn create-args []
-  (let [{:as db :keys [conn]} (create-db-connection)
-        insert-prices-pstmt (.prepareStatement conn insert-sql)]
-    (->hash db insert-prices-pstmt)))
-
-(defn run []
-  (let [num-threads (+ 2 (cp/ncpus))]
-    (->> (get-zips)
-         ; (take 2)
-         (cp/pmap num-threads process-zip!)
-         (reduce merge-maps {})
-         (sort-series)
-         (insert-into-db (create-args)))))
+        nil))))
