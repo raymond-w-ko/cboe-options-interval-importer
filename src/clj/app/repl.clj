@@ -3,13 +3,14 @@
    [java.util.concurrent TimeUnit]
    [java.nio ByteBuffer ByteOrder]
    [java.nio.channels Channels]
+   [java.time Instant]
    
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
     SeekOp DbiFlags PutFlags KeyRange]
    [org.agrona MutableDirectBuffer]
    [org.agrona.concurrent UnsafeBuffer]
    
-   [app.types DbKey DbValue Utils])
+   [app.types DbKey CompactDbValue Utils])
   (:require
    [clojure.java.io :as io]
    [taoensso.timbre :as timbre
