@@ -1,0 +1,9 @@
+{
+   "type": "record",
+   "name": "SPX",
+   "fields":
+   [
+      {"name": "t", "type": {"type": "long", "logicalType": "timestamp-millis"}},
+      {"name": "price", "type": "float"}
+   ]
+ }
