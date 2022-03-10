@@ -15,7 +15,7 @@
 (set! *unchecked-math* :warn-on-boxed)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def db-max-size (* 1024 1024 1024 1024))
+(def db-max-size (* 1024 1024 1024 (+ 1024 512)))
 (def normal-read-env-flags (into-array org.lmdbjava.EnvFlags
                                        [EnvFlags/MDB_RDONLY_ENV
                                         EnvFlags/MDB_NORDAHEAD]))
