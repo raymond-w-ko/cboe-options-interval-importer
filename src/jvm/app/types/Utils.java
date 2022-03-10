@@ -4,9 +4,11 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZonedDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
+import java.util.concurrent.ConcurrentHashMap;
 import org.agrona.DirectBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -17,8 +19,9 @@ public final class Utils {
 
   private Utils() {}
 
-  private static LRUMap<String, Instant> instantLookupMap = new LRUMap<String, Instant>(
-    1024 * 1024
+  private static int CACHE_MAX_SIZE = 1024 * 1024;
+  private static ConcurrentHashMap<String, Instant> instantLookupMap = new ConcurrentHashMap<String, Instant>(
+    CACHE_MAX_SIZE
   );
   private static DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(
     "yyyy-MM-dd HH:mm:ss"
@@ -28,6 +31,10 @@ public final class Utils {
   public static Instant QuoteDateTimeToInstant(String s) {
     if (instantLookupMap.containsKey(s)) {
       return instantLookupMap.get(s);
+    }
+    if (instantLookupMap.size() > CACHE_MAX_SIZE) {
+      System.out.println("instantLookupMap clear()");
+      instantLookupMap.clear();
     }
 
     final var ldt = LocalDateTime.parse(s, dateTimeFormatter);
@@ -56,16 +63,16 @@ public final class Utils {
   }
 
   public static ByteBuffer InstantToByteBuffer(Instant t) {
-    final int secs = (int)t.getEpochSecond();
-    final var buf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(secs);
+    final int secs = (int) t.getEpochSecond();
+    final var buf = ByteBuffer.allocateDirect(4).order(ByteOrder.BIG_ENDIAN).putInt(secs);
     return buf;
   }
 
   public static Instant ByteBufferToInstant(DirectBuffer srcBuf, int i) {
-    final var dstBuf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN);
+    final var dstBuf = ByteBuffer.allocateDirect(4).order(ByteOrder.BIG_ENDIAN);
     srcBuf.getBytes(i, dstBuf, 0, 4);
     final int secs = dstBuf.getInt(0);
-    return Instant.ofEpochSecond((long)secs);
+    return Instant.ofEpochSecond((long) secs);
   }
 
   private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
