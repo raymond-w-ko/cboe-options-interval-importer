@@ -63,7 +63,7 @@
         entry (.getNextEntry zip-stream)
         fname (.getName entry)
         reader (-> (InputStreamReader. zip-stream)
-                   (BufferedReader. (* 1024 1024 64)))]
+                   (BufferedReader. (* 1024 1024 32)))]
     {:reader reader
      :fname fname}))
 

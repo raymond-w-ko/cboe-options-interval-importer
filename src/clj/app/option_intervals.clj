@@ -1,6 +1,6 @@
 (ns app.option-intervals
   (:import
-   [java.lang String]
+   [java.lang String System]
 
    [java.io File LineNumberReader InputStreamReader BufferedReader]
    [org.lmdbjava Env EnvFlags DirectBufferProxy Verifier ByteBufferProxy Txn
@@ -118,6 +118,7 @@
                  ([_] nil)
                  ([_ bundle] (>!! interval-bundle-ch bundle)))
                lines)
+    (debug "done ZIP file:" fname)
     (.close reader)))
 
 (defn process-zip-file-with-gen-fns
@@ -155,7 +156,7 @@
                     *num-items]}]
   (let [zip-files (->> (get-zips src-dir)
                        (into [] zip-files-xf))
-        interval-bundle-ch (chan 4)
+        interval-bundle-ch (chan 2)
         start-instant (System/currentTimeMillis)
         args (mac/args interval-bundle-ch)]
     (dorun (map (fn [^File file] (.exists file)) zip-files))
@@ -180,7 +181,6 @@
 
       (when intervals
         (when write-to-lmdb
-          (assert false)
           (load-interval-data args intervals))
         (swap! *num-items + (count intervals))
         (recur (<!! interval-bundle-ch))))

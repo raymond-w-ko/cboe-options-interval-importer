@@ -34,7 +34,7 @@
 (defn is-spxw-root? [^"[Ljava.lang.String;" line] (= "SPXW" (field line "root")))
 
 (defn import-puts []
-  (let [zip-files-xf (comp (filter (partial >=-than-year? 2016)))
+  (let [zip-files-xf (comp)
         line-xf (comp (filter is-put?)
                       (filter is-spxw-root?))
         args (merge
